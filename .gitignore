@@ -7,7 +7,7 @@ profiler
 *.dylib
 
 # Test binaries
-*.test
+# *.test
 
 # Output files
 *.txt
