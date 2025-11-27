@@ -1,0 +1,31 @@
+# Binaries
+adi-profiler
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Output files
+adi-trace.txt
+*.trace
+
+# Go workspace
+/bin/
+/pkg/
+
+# Go build cache
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
