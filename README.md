@@ -10,7 +10,7 @@ Minimal eBPF-backed HTTP syscall profiler written in Golang, plus a tiny test se
 - `cmd/profiler`: eBPF-powered profiler that attaches to socket syscalls and writes request/response metadata to a local file.
 - `bpf/profiler.bpf.c`: BPF program (compiled via `bpf2go` during build).
 
-## Setup (Ubuntu 20/22/23/25)
+## Setup (tested on Ubuntu 25)
 
 There are probably better/smarter/faster/cooler ways to run this, but the way I pulled it off was to run a [Lima VM](https://lima-vm.io/) on my Mac. Note that I'm running on an ARM64 Mac, and I have not tested this on an x86 machine of any sort. Which means I also haven't tested it on a real Linux box.
 
