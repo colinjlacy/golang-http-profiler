@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/netip"
 	"os"
@@ -41,6 +40,7 @@ type Event struct {
 	Direction uint8
 	_         [1]byte // padding to align to 8 bytes for the following arrays
 	Comm      [16]byte
+	Cmd       [16]byte
 	Saddr     [16]byte
 	Daddr     [16]byte
 	Data      [256]byte
@@ -65,16 +65,6 @@ func NewRunner(port uint16, outputPath string) *Runner {
 func (r *Runner) Run(ctx context.Context) error {
 	if err := ensureMemlock(); err != nil {
 		return err
-	}
-
-	// Print the entirety of /proc/self/limits to the console
-	file, err := os.Open("/proc/self/limits")
-	if err != nil {
-		fmt.Printf("Failed to open /proc/self/limits: %v\n", err)
-	} else {
-		defer file.Close()
-		fmt.Println("=== /proc/self/limits ===")
-		io.Copy(os.Stdout, file)
 	}
 
 	var objs profilerObjects
@@ -139,6 +129,17 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
+
+	shutdown := make(chan struct{})
+	go func() {
+		defer close(shutdown)
+		select {
+		case <-ctx.Done():
+		case <-signals:
+		}
+		rd.Close()
+	}()
 
 	for {
 		record, err := rd.Read()
@@ -171,6 +172,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
+// ntohs converts a 16-bit integer from network byte order (big endian) to host byte order.
+// In network protocols, port numbers and similar fields are transmitted in big endian order.
+// This function reverses the byte order, assuming the host is little endian (which is true for common platforms).
 func ntohs(v uint16) uint16 {
 	return (v >> 8) | (v << 8)
 }
@@ -190,10 +194,25 @@ func (r *Runner) formatEvent(ev *Event, parsed Parsed) string {
 	daddr := ipFromBytes(ev.Family, ev.Daddr[:])
 	payload := strings.TrimSpace(string(ev.Data[:ev.DataLen]))
 
+	// Lookup the command line for the process using /proc/<pid>/cmdline
+	cmdline := ""
+	cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", ev.Pid)
+	if data, err := os.ReadFile(cmdlinePath); err == nil && len(data) > 0 {
+		// /proc/<pid>/cmdline is null-separated. Replace with spaces and trim
+		cmdline = strings.ReplaceAll(string(data), "\x00", " ")
+		cmdline = strings.TrimSpace(cmdline)
+	} else if err != nil {
+		cmdline = fmt.Sprintf("[cmdline error: %v]", err)
+	} else {
+		cmdline = "[cmdline empty]"
+	}
+
 	var parts []string
 	parts = append(parts, fmt.Sprintf("ts=%s", time.Unix(0, int64(ev.Ts)).Format(time.RFC3339Nano)))
 	parts = append(parts, fmt.Sprintf("pid=%d", ev.Pid))
 	parts = append(parts, fmt.Sprintf("comm=%s", strings.Trim(string(ev.Comm[:]), "\x00")))
+	parts = append(parts, fmt.Sprintf("cmd=%s", strings.Trim(string(ev.Cmd[:]), "\x00")))
+	parts = append(parts, fmt.Sprintf("cmdline=%q", cmdline))
 	parts = append(parts, fmt.Sprintf("dir=%s", dir))
 	parts = append(parts, fmt.Sprintf("src=%s:%d", saddr, sport))
 	parts = append(parts, fmt.Sprintf("dst=%s:%d", daddr, dport))

@@ -68,28 +68,28 @@ struct accept_args {
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 20);
+    __uint(max_entries, 1 << 24);
 } events SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, __u64);
     __type(value, struct recv_args);
-    __uint(max_entries, 512);
+    __uint(max_entries, 10240);
 } recv_args_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, __u64);
     __type(value, struct accept_args);
-    __uint(max_entries, 512);
+    __uint(max_entries, 1024);
 } accept_args_map SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, __u64);
     __type(value, struct conn_info);
-    __uint(max_entries, 512);
+    __uint(max_entries, 16384);
 } conn_map SEC(".maps");
 
 // Generic tracepoint context for sys_enter_*
