@@ -7,33 +7,31 @@ Minimal eBPF-backed HTTP syscall profiler plus a tiny test service and traffic g
 - `cmd/traffic`: small Go script that repeatedly hits the service.
 - `cmd/profiler`: eBPF-powered profiler that attaches to socket syscalls and writes request/response metadata to a local file.
 - `bpf/profiler.bpf.c`: BPF program (compiled via `bpf2go` during build).
-- `docker-compose.yml`: orchestrates the three containers; profiler runs privileged and writes logs to `./output/ebpf_http.log`.
 
-## Prereqs (Ubuntu 20/22/23)
-- Docker + docker compose.
-- x86_64 kernel with BTF available (`/sys/kernel/btf/vmlinux` is present on stock Ubuntu).
-- Ability to run privileged containers (needed for kprobes/eBPF).
-- Go toolchain 1.25+ if you build locally (Docker build also uses Go 1.25).
-
-## Quick start (Docker)
-```bash
-# From repo root
-docker compose build
-docker compose up
-
-# Watch profiler output
-tail -f output/ebpf_http.log
+## Setup (Ubuntu 20/22/23/25)
+- Go toolchain 1.25+ 
+- Install C libraries (I had to sudo on a lima VM):
+```
+apt-get update
+sudo apt-get install -y --no-install-recommends \
+    clang llvm make pkg-config libelf-dev zlib1g-dev linux-libc-dev libbpf-dev
+sudo rm -rf /var/lib/apt/lists/*
+```
+- set up necessary symlink:
+```
+arch="$(uname -m)" && \
+case "${arch}" in \
+    x86_64) multiarch="x86_64-linux-gnu" ;; \
+    aarch64|arm64) multiarch="aarch64-linux-gnu" ;; \
+    *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+esac && \
+ln -sf /usr/include/${multiarch}/asm /usr/include/asm
 ```
 
 - The profiler filters on `HTTP_PORT` (default `8080`) and writes to `/output/ebpf_http.log` inside the container, mapped to `./output/ebpf_http.log` on the host.
 - The traffic generator issues GET/POST traffic in a loop so you can see request/response bodies, methods, URLs, and status codes captured from syscall payloads.
 
-## Config knobs
-- `HTTP_PORT`: port the HTTP service listens on and the profiler filters for (default `8080`).
-- `OUTPUT_PATH`: file path inside the profiler container for log output (default `/output/ebpf_http.log`).
-- `TOTAL_REQUESTS`, `REQUEST_DELAY_MS`, `TARGET_HOST` for the traffic generator.
-
-## Local build (outside Docker)
+## Local build
 ```bash
 # Linux only; requires clang/llvm and kernel headers
 go mod download
