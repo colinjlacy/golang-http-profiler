@@ -16,7 +16,7 @@ type echoBody struct {
 }
 
 func main() {
-	host := envOrDefault("TARGET_HOST", "http-service")
+	host := envOrDefault("TARGET_HOST", "127.0.0.1")
 	port := envAsInt("HTTP_PORT", 8080)
 	total := envAsInt("TOTAL_REQUESTS", 50)
 	delayMs := envAsInt("REQUEST_DELAY_MS", 500)

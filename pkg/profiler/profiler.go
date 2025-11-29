@@ -38,12 +38,11 @@ type Event struct {
 	Dport     uint16
 	Family    uint16
 	Direction uint8
-	_         [1]byte // padding to align to 8 bytes for the following arrays
-	Comm      [16]byte
-	Cmd       [16]byte
-	Saddr     [16]byte
-	Daddr     [16]byte
-	Data      [256]byte
+	// _         [1]byte // padding to align to 8 bytes for the following arrays
+	Comm  [16]byte
+	Saddr [16]byte
+	Daddr [16]byte
+	Data  [256]byte
 }
 
 type Parsed struct {
@@ -136,8 +135,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		defer close(shutdown)
 		select {
 		case <-ctx.Done():
+			log.Printf("context done, closing ringbuf")
 		case <-signals:
+			log.Printf("signal received, closing ringbuf")
 		}
+		log.Printf("closing ringbuf")
 		rd.Close()
 	}()
 
@@ -145,27 +147,34 @@ func (r *Runner) Run(ctx context.Context) error {
 		record, err := rd.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
+				log.Printf("ringbuf closed, exiting")
 				return nil
 			}
 			return fmt.Errorf("read ringbuf: %w", err)
 		}
 
 		ev := (*Event)(unsafe.Pointer(&record.RawSample[0]))
-		if !r.portMatches(ev) {
-			continue
-		}
+		// if !r.portMatches(ev) {
+		// 	log.Printf("event not for target port, skipping")
+		// 	continue
+		// }
 
 		parsed := parseHTTP(ev)
 		line := r.formatEvent(ev, parsed)
+		log.Printf("writing line: %s", line)
 		if _, err := writer.WriteString(line + "\n"); err != nil {
+			log.Printf("error writing line: %v", err)
 			return fmt.Errorf("write log: %w", err)
 		}
+		log.Printf("flushed writer")
 		writer.Flush()
 
 		select {
 		case <-ctx.Done():
+			log.Printf("context done, exiting")
 			return nil
 		case <-signals:
+			log.Printf("signal received, exiting")
 			return nil
 		default:
 		}
@@ -211,7 +220,6 @@ func (r *Runner) formatEvent(ev *Event, parsed Parsed) string {
 	parts = append(parts, fmt.Sprintf("ts=%s", time.Unix(0, int64(ev.Ts)).Format(time.RFC3339Nano)))
 	parts = append(parts, fmt.Sprintf("pid=%d", ev.Pid))
 	parts = append(parts, fmt.Sprintf("comm=%s", strings.Trim(string(ev.Comm[:]), "\x00")))
-	parts = append(parts, fmt.Sprintf("cmd=%s", strings.Trim(string(ev.Cmd[:]), "\x00")))
 	parts = append(parts, fmt.Sprintf("cmdline=%q", cmdline))
 	parts = append(parts, fmt.Sprintf("dir=%s", dir))
 	parts = append(parts, fmt.Sprintf("src=%s:%d", saddr, sport))
