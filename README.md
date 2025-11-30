@@ -89,6 +89,7 @@ The profiler uses an opt-in system to control which processes are profiled. Targ
 
 **Target Process Environment Variables:**
 - `ADI_PROFILE=<environment>` - **Required for profiling.** Indicates the process opts into profiling. The value should indicate the environment (e.g., `local`, `dev`, `staging`, `prod`).
+- `ADI_PROFILE_NAME=<name>` - **Optional.** A human-readable name for the service or process instance. This value will be included in the YAML output as `adi_profile_name` for easier identification.
 - `ADI_PROFILE_DISABLED=1` - **Override to disable profiling.** If set, the process will not be profiled even if `ADI_PROFILE` is present.
 
 **Profiling Logic:**
@@ -222,29 +223,39 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:
 ```yaml
-pid: 12345
-adi_profile: "local"
-env:
+---
+adi_profile_pid: 12345
+adi_profile_match: "local"
+adi_profile_name: "reviews"
+adi_profile_cmdline: "/usr/bin/python3 /app/server.py --port 9080"
+adi_profile_env:
   PATH: "/usr/local/bin:/usr/bin:/bin"
   HOME: "/home/user"
   REVIEWS_SERVICE_URL: "http://reviews:9080"
   RATINGS_HOSTNAME: "ratings"
 ---
-pid: 67890
-adi_profile: "staging"
-env:
+adi_profile_pid: 67890
+adi_profile_match: "staging"
+adi_profile_cmdline: "./ratings-service"
+adi_profile_env:
   MONGO_HOST: "mongodb://db:27017"
   MONGO_DATABASE: "bookinfo"
 ---
-pid: 99999
-adi_profile: "local"
+adi_profile_pid: 99999
+adi_profile_match: "local"
+adi_profile_cmdline: "/app/service --config /etc/config.yaml"
 error: "open /proc/99999/environ: no such file or directory"
 ```
 
 Each document includes:
-- `pid`: The process ID
+- `adi_profile_pid`: The process ID
 - `adi_profile_match`: The value of the `ADI_PROFILE` environment variable that qualified this process for profiling
-- `env`: Key-value pairs of environment variables (filtered by `ENV_PREFIX_LIST` if specified)
+- `adi_profile_name`: **(Optional)** The value of `ADI_PROFILE_NAME` if set on the target process. Useful for identifying specific service instances.
+- `adi_profile_cmdline`: The command line used to start the process (from `/proc/<pid>/cmdline`)
+- `adi_profile_env`: Key-value pairs of environment variables (filtered by `ENV_PREFIX_LIST` if specified)
 - `error`: Error message if the process exits before the profiler can read its environment
 
-When `ENV_PREFIX_LIST` is used, only matching environment variables are included (PIDs may have empty `env: {}` if no variables match).
+**Notes:**
+- When `ENV_PREFIX_LIST` is used, only matching environment variables are included in `adi_profile_env` (PIDs may have empty `adi_profile_env: {}` if no variables match)
+- `adi_profile_name` only appears if the target process has `ADI_PROFILE_NAME` set
+- All documents are separated by `---` for proper YAML multi-document format
