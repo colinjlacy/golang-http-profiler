@@ -82,6 +82,13 @@ These environment variables configure the profiler itself:
 - `ENV_OUTPUT_PATH=/var/log/ebpf_http_env.yaml` - File path for environment variable logs (YAML format)
 - `ENV_PREFIX_LIST=""` - Comma-separated list of environment variable key prefixes to include (case-sensitive). If not set, all environment variables are collected.
 - `ADI_PROFILE_ALLOWED=""` - Comma-separated list of ADI_PROFILE values to profile (see Opt-In Profiling below). If not set, all processes with `ADI_PROFILE` set (any value) will be profiled.
+- `CONTAINERD_SOCKET=""` - Path to containerd or Docker socket. If not set, container metadata enrichment is disabled.
+  - For Docker: `/var/run/docker.sock` (probably?)
+  - For rootless nerdctl: `/run/user/$UID/containerd/containerd.sock`
+  - For rootful nerdctl/containerd: `/run/containerd/containerd.sock`
+  - For rootless podman: `/run/user/$UID/podman/podman.sock`
+  - For rootful podman: `/run/podman/podman.sock`
+- `CONTAINERD_NAMESPACE=default` - Containerd namespace to use (nerdctl typically uses `default`)
 
 ### Opt-In Profiling
 
@@ -144,6 +151,17 @@ sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
      ./profiler
 ```
 
+Profile with container metadata enrichment (service-to-service mapping):
+```sh
+# using nerdctl rootless as an example for the container enrichment flags
+sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
+     ENV_OUTPUT_PATH="/some/path/ebpf_env_profiler.yaml" \
+     CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
+     CONTAINERD_NAMESPACE="default" \
+     ADI_PROFILE_ALLOWED="local,dev" \
+     ./profiler
+```
+
 **Step 2: Start services with opt-in flag**
 
 For the demo HTTP server and traffic generator, `ADI_PROFILE=local` has already been set in `docker-compose.yml`. Run them both with:
@@ -166,13 +184,15 @@ I've got [another repo](https://github.com/colinjlacy/bookinfo-docker-compose) t
 
 To profile the Bookinfo services:
 
-**Step 1: Start the profiler with environment-specific filtering**
+**Step 1: Start the profiler with environment-specific filtering and container metadata**
 
 ```sh
 sudo OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_http_profiler.log" \
      ENV_OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_env_profiler.yaml" \
      ENV_PREFIX_LIST="REVIEWS_,RATINGS_,MONGO_,DETAILS_" \
      ADI_PROFILE_ALLOWED="local,dev" \
+     CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
+     CONTAINERD_NAMESPACE="default" \
      ./profiler
 ```
 
@@ -214,11 +234,36 @@ JSON lines with syscall-derived metadata and parsed HTTP fields:
     "User-Agent": "Go-http-client/1.1",
     "Content-Type": "application/json"
   },
-  "raw_payload": "GET /echo HTTP/1.1\r\nHost: ..."
+  "raw_payload": "GET /echo HTTP/1.1\r\nHost: ...",
+  "source_container": {
+    "service": "productpage",
+    "image": "myorg/productpage:1.0.0",
+    "container_id": "abc123def456...",
+    "container_name": "productpage-1"
+  },
+  "destination_container": {
+    "service": "reviews",
+    "image": "myorg/reviews:2.1.0",
+    "container_id": "789xyz012...",
+    "container_name": "reviews-1"
+  },
+  "destination_type": "container"
 }
 ```
 
 Fields include parsed HTTP method, URL, status code (for responses), headers, request/response bodies, plus the complete raw payload from the syscalls. Only HTTP traffic is logged; UDP and non-HTTP TCP traffic is filtered out.
+
+### Container metadata fields
+
+- `source_container`: Metadata about the container making the request (resolved from PID's cgroup)
+  - `service`: Docker Compose service name (from `com.docker.compose.service` label)
+  - `image`: Container image with tag
+  - `container_id`: Full container ID
+  - `container_name`: Human-readable container name
+- `destination_container`: Metadata about the container receiving the request (resolved from destination IP:port)
+  - Same fields as `source_container`
+  - Will be `null` for external destinations
+- `destination_type`: Either `"container"` (for container-to-container calls) or `"external"` (for calls outside the container runtime)
 
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:

@@ -39,7 +39,11 @@ func main() {
 		}
 	}
 
-	if err := profiler.NewRunner(port, output, envOutput, envPrefixes, adiProfileAllowed).Run(context.Background()); err != nil {
+	// Container runtime configuration
+	containerdSocket := envOrDefault("CONTAINERD_SOCKET", "")
+	containerdNamespace := envOrDefault("CONTAINERD_NAMESPACE", "default")
+
+	if err := profiler.NewRunner(port, output, envOutput, envPrefixes, adiProfileAllowed, containerdSocket, containerdNamespace).Run(context.Background()); err != nil {
 		log.Fatalf("profiler failed: %v", err)
 	}
 }

@@ -54,48 +54,63 @@ type Parsed struct {
 	Headers    map[string]string
 }
 
+type ContainerInfo struct {
+	Service       string `json:"service,omitempty"`
+	Image         string `json:"image,omitempty"`
+	ContainerID   string `json:"container_id,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
+}
+
 type HTTPEvent struct {
-	Timestamp  string            `json:"timestamp"`
-	PID        uint32            `json:"pid"`
-	Comm       string            `json:"comm"`
-	Cmdline    string            `json:"cmdline"`
-	Direction  string            `json:"direction"`
-	SourceIP   string            `json:"source_ip"`
-	SourcePort uint16            `json:"source_port"`
-	DestIP     string            `json:"dest_ip"`
-	DestPort   uint16            `json:"dest_port"`
-	Bytes      uint32            `json:"bytes"`
-	Method     string            `json:"method,omitempty"`
-	URL        string            `json:"url,omitempty"`
-	StatusCode string            `json:"status_code,omitempty"`
-	Body       string            `json:"body,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	RawPayload string            `json:"raw_payload,omitempty"`
+	Timestamp            string            `json:"timestamp"`
+	PID                  uint32            `json:"pid"`
+	Comm                 string            `json:"comm"`
+	Cmdline              string            `json:"cmdline"`
+	Direction            string            `json:"direction"`
+	SourceIP             string            `json:"source_ip"`
+	SourcePort           uint16            `json:"source_port"`
+	DestIP               string            `json:"dest_ip"`
+	DestPort             uint16            `json:"dest_port"`
+	Bytes                uint32            `json:"bytes"`
+	Method               string            `json:"method,omitempty"`
+	URL                  string            `json:"url,omitempty"`
+	StatusCode           string            `json:"status_code,omitempty"`
+	Body                 string            `json:"body,omitempty"`
+	Headers              map[string]string `json:"headers,omitempty"`
+	RawPayload           string            `json:"raw_payload,omitempty"`
+	SourceContainer      *ContainerInfo    `json:"source_container,omitempty"`
+	DestinationContainer *ContainerInfo    `json:"destination_container,omitempty"`
+	DestinationType      string            `json:"destination_type,omitempty"` // "container" or "external"
 }
 
 type Runner struct {
-	targetPort        uint16
-	outputPath        string
-	envOutputPath     string
-	envPrefixes       []string
-	adiProfileAllowed []string
-	seenPIDs          map[uint32]string // stores cmdline for each PID
-	pidAdiProfiles    map[uint32]string // stores ADI_PROFILE value for each PID
-	pidNames          map[uint32]string // stores ADI_PROFILE_NAME value for each PID
-	writtenPIDs       map[uint32]bool   // tracks which PIDs have been written to YAML
+	targetPort          uint16
+	outputPath          string
+	envOutputPath       string
+	envPrefixes         []string
+	adiProfileAllowed   []string
+	seenPIDs            map[uint32]string // stores cmdline for each PID
+	pidAdiProfiles      map[uint32]string // stores ADI_PROFILE value for each PID
+	pidNames            map[uint32]string // stores ADI_PROFILE_NAME value for each PID
+	writtenPIDs         map[uint32]bool   // tracks which PIDs have been written to YAML
+	containerResolver   *ContainerResolver
+	containerdSocket    string
+	containerdNamespace string
 }
 
-func NewRunner(port uint16, outputPath string, envOutputPath string, envPrefixes []string, adiProfileAllowed []string) *Runner {
+func NewRunner(port uint16, outputPath string, envOutputPath string, envPrefixes []string, adiProfileAllowed []string, containerdSocket string, containerdNamespace string) *Runner {
 	return &Runner{
-		targetPort:        port,
-		outputPath:        outputPath,
-		envOutputPath:     envOutputPath,
-		envPrefixes:       envPrefixes,
-		adiProfileAllowed: adiProfileAllowed,
-		seenPIDs:          make(map[uint32]string),
-		pidAdiProfiles:    make(map[uint32]string),
-		pidNames:          make(map[uint32]string),
-		writtenPIDs:       make(map[uint32]bool),
+		targetPort:          port,
+		outputPath:          outputPath,
+		envOutputPath:       envOutputPath,
+		envPrefixes:         envPrefixes,
+		adiProfileAllowed:   adiProfileAllowed,
+		seenPIDs:            make(map[uint32]string),
+		pidAdiProfiles:      make(map[uint32]string),
+		pidNames:            make(map[uint32]string),
+		writtenPIDs:         make(map[uint32]bool),
+		containerdSocket:    containerdSocket,
+		containerdNamespace: containerdNamespace,
 	}
 }
 
@@ -260,6 +275,19 @@ func (r *Runner) collectAndWriteEnv(pid uint32, envFile *os.File) {
 func (r *Runner) Run(ctx context.Context) error {
 	if err := ensureMemlock(); err != nil {
 		return err
+	}
+
+	// Initialize container resolver if containerd socket is provided
+	if r.containerdSocket != "" {
+		resolver, err := NewContainerResolver(r.containerdSocket, r.containerdNamespace)
+		if err != nil {
+			log.Printf("warning: failed to initialize container resolver: %v", err)
+			log.Printf("continuing without container metadata enrichment")
+		} else {
+			r.containerResolver = resolver
+			defer r.containerResolver.Close()
+			log.Printf("container resolver initialized for namespace '%s'", r.containerdNamespace)
+		}
 	}
 
 	var objs profilerObjects
@@ -489,6 +517,42 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 		Body:       parsed.Body,
 		Headers:    parsed.Headers,
 		RawPayload: payload,
+	}
+
+	// Enrich with container metadata if resolver is available
+	if r.containerResolver != nil {
+		// Resolve source container from PID
+		log.Printf("debug: attempting to resolve source PID %d", ev.Pid)
+		if srcMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); srcMeta != nil {
+			log.Printf("debug: resolved source PID %d to container %s (service: %s)", ev.Pid, srcMeta.ContainerName, srcMeta.Service)
+			event.SourceContainer = &ContainerInfo{
+				Service:       srcMeta.Service,
+				Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
+				ContainerID:   srcMeta.ContainerID,
+				ContainerName: srcMeta.ContainerName,
+			}
+		} else {
+			log.Printf("debug: could not resolve source PID %d to container", ev.Pid)
+		}
+
+		// Resolve destination container from IP:port
+		log.Printf("debug: attempting to resolve destination %s:%d", daddr.String(), dport)
+		if dstMeta := r.containerResolver.ResolveDestination(daddr, dport); dstMeta != nil {
+			log.Printf("debug: resolved destination %s:%d to container %s (service: %s)", daddr.String(), dport, dstMeta.ContainerName, dstMeta.Service)
+			event.DestinationContainer = &ContainerInfo{
+				Service:       dstMeta.Service,
+				Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
+				ContainerID:   dstMeta.ContainerID,
+				ContainerName: dstMeta.ContainerName,
+			}
+			event.DestinationType = "container"
+		} else {
+			log.Printf("debug: could not resolve destination %s:%d to container (external)", daddr.String(), dport)
+			// External destination
+			event.DestinationType = "external"
+		}
+	} else {
+		log.Printf("debug: container resolver is nil, skipping enrichment")
 	}
 
 	jsonBytes, err := json.Marshal(event)
