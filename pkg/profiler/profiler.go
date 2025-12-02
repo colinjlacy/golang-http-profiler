@@ -521,28 +521,55 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 
 	// Enrich with container metadata if resolver is available
 	if r.containerResolver != nil {
-		// Resolve source container from PID
-		if srcMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); srcMeta != nil {
-			event.SourceContainer = &ContainerInfo{
-				Service:       srcMeta.Service,
-				Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
-				ContainerID:   srcMeta.ContainerID,
-				ContainerName: srcMeta.ContainerName,
-			}
-		}
+		// For consistent semantics:
+		// - source_container = sender (who initiated the request)
+		// - destination_container = receiver (who received the request)
 
-		// Resolve destination container from IP:port
-		if dstMeta := r.containerResolver.ResolveDestination(daddr, dport); dstMeta != nil {
-			event.DestinationContainer = &ContainerInfo{
-				Service:       dstMeta.Service,
-				Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
-				ContainerID:   dstMeta.ContainerID,
-				ContainerName: dstMeta.ContainerName,
+		if ev.Direction == dirSend {
+			// Send event: PID is sender, dest IP is receiver
+			if srcMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); srcMeta != nil {
+				event.SourceContainer = &ContainerInfo{
+					Service:       srcMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
+					ContainerID:   srcMeta.ContainerID,
+					ContainerName: srcMeta.ContainerName,
+				}
 			}
-			event.DestinationType = "container"
+
+			if dstMeta := r.containerResolver.ResolveDestination(daddr, dport); dstMeta != nil {
+				event.DestinationContainer = &ContainerInfo{
+					Service:       dstMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
+					ContainerID:   dstMeta.ContainerID,
+					ContainerName: dstMeta.ContainerName,
+				}
+				event.DestinationType = "container"
+			} else {
+				event.DestinationType = "external"
+			}
 		} else {
-			// External destination
-			event.DestinationType = "external"
+			// Recv event: PID is receiver, source IP is sender
+			// Swap the resolution logic to keep source = sender, destination = receiver
+			if srcMeta := r.containerResolver.ResolveDestination(saddr, sport); srcMeta != nil {
+				event.SourceContainer = &ContainerInfo{
+					Service:       srcMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
+					ContainerID:   srcMeta.ContainerID,
+					ContainerName: srcMeta.ContainerName,
+				}
+			}
+
+			if dstMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); dstMeta != nil {
+				event.DestinationContainer = &ContainerInfo{
+					Service:       dstMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
+					ContainerID:   dstMeta.ContainerID,
+					ContainerName: dstMeta.ContainerName,
+				}
+				event.DestinationType = "container"
+			} else {
+				event.DestinationType = "external"
+			}
 		}
 	}
 
