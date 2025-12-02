@@ -255,15 +255,24 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 
 ### Container metadata fields
 
-- `source_container`: Metadata about the container making the request (resolved from PID's cgroup)
+**When `CONTAINERD_SOCKET` is configured**, HTTP events are enriched with container metadata:
+
+- `source_container`: Metadata about the container that **sent** the request (the requester)
   - `service`: Docker Compose service name (from `com.docker.compose.service` label)
   - `image`: Container image with tag
   - `container_id`: Full container ID
   - `container_name`: Human-readable container name
-- `destination_container`: Metadata about the container receiving the request (resolved from destination IP:port)
+- `destination_container`: Metadata about the container that **received** the request (the responder)
   - Same fields as `source_container`
   - Will be `null` for external destinations
 - `destination_type`: Either `"container"` (for container-to-container calls) or `"external"` (for calls outside the container runtime)
+
+**How it works:**
+- For `"send"` events: Source resolved from PID (sender), destination from IP (receiver)
+- For `"recv"` events: Source resolved from IP (sender), destination from PID (receiver)
+- This ensures `source_container` always means "who sent it" and `destination_container` always means "who received it"
+
+**Note:** Some `recv` events may have `source_ip: "invalid IP"` when socket peer information isn't available. These events will only have `destination_container` populated. Full service-to-service mapping is captured in the corresponding `send` events.
 
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:
