@@ -43,7 +43,7 @@ type Event struct {
 	Comm  [16]byte
 	Saddr [16]byte
 	Daddr [16]byte
-	Data  [256]byte
+	Data  [2048]byte
 }
 
 type Parsed struct {
@@ -642,8 +642,9 @@ func extractBody(payload string) string {
 		return ""
 	}
 	body := strings.TrimSpace(parts[1])
-	if len(body) > 120 {
-		body = body[:120] + "..."
+	// Increased from 120 to 1500 to capture more payload data
+	if len(body) > 1500 {
+		body = body[:1500] + "..."
 	}
 	return body
 }

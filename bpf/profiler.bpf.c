@@ -24,7 +24,7 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_DATA_SIZE 256
+#define MAX_DATA_SIZE 2048
 
 enum direction {
     DIR_SEND = 0,
