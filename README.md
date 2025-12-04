@@ -80,6 +80,7 @@ These environment variables configure the profiler itself:
 
 - `OUTPUT_PATH=/var/log/ebpf_http_profiler.log` - File path for HTTP event logs (JSON format)
 - `ENV_OUTPUT_PATH=/var/log/ebpf_http_env.yaml` - File path for environment variable logs (YAML format)
+- `SERVICE_MAP_PATH=""` - File path for service integration map (JSON format). If not set, service map is disabled.
 - `ENV_PREFIX_LIST=""` - Comma-separated list of environment variable key prefixes to include (case-sensitive). If not set, all environment variables are collected.
 - `ADI_PROFILE_ALLOWED=""` - Comma-separated list of ADI_PROFILE values to profile (see Opt-In Profiling below). If not set, all processes with `ADI_PROFILE` set (any value) will be profiled.
 - `CONTAINERD_SOCKET=""` - Path to containerd or Docker socket. If not set, container metadata enrichment is disabled.
@@ -156,6 +157,7 @@ Profile with container metadata enrichment (service-to-service mapping):
 # using nerdctl rootless as an example for the container enrichment flags
 sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
      ENV_OUTPUT_PATH="/some/path/ebpf_env_profiler.yaml" \
+     SERVICE_MAP_PATH="/some/path/ebpf_service_map.json" \
      CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
      CONTAINERD_NAMESPACE="default" \
      ADI_PROFILE_ALLOWED="local,dev" \
@@ -189,6 +191,7 @@ To profile the Bookinfo services:
 ```sh
 sudo OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_http_profiler.log" \
      ENV_OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_env_profiler.yaml" \
+     SERVICE_MAP_PATH="/home/lima.linux/http-profiler/output/ebpf_service_map.json" \
      ENV_PREFIX_LIST="REVIEWS_,RATINGS_,MONGO_,DETAILS_" \
      ADI_PROFILE_ALLOWED="local,dev" \
      CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
@@ -273,6 +276,48 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 - This ensures `source_container` always means "who sent it" and `destination_container` always means "who received it"
 
 **Note:** Some `recv` events may have `source_ip: "invalid IP"` when socket peer information isn't available. These events will only have `destination_container` populated. Full service-to-service mapping is captured in the corresponding `send` events.
+
+### Service Integration Map (JSON)
+
+**When `SERVICE_MAP_PATH` is configured**, a service integration map is maintained that tracks unique service-to-service connections:
+
+```json
+{
+  "generated_at": "2024-04-08T18:30:00.000000000Z",
+  "integrations": [
+    {
+      "source_service": "productpage",
+      "source_image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
+      "destination_service": "details",
+      "destination_image": "docker.io/istio/examples-bookinfo-details-v1:1.20.1",
+      "destination_type": "container",
+      "methods": ["GET"],
+      "paths": ["/details/0", "/details/1"],
+      "first_seen": "2024-04-08T18:24:10.000000000Z",
+      "last_seen": "2024-04-08T18:30:00.000000000Z",
+      "count": 150
+    },
+    {
+      "source_service": "productpage",
+      "source_image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
+      "destination_service": "external",
+      "destination_type": "external",
+      "methods": ["GET"],
+      "paths": ["/api/external"],
+      "first_seen": "2024-04-08T18:25:00.000000000Z",
+      "last_seen": "2024-04-08T18:29:00.000000000Z",
+      "count": 10
+    }
+  ]
+}
+```
+
+**How it works:**
+- The map is updated in-memory whenever a new HTTP request is detected
+- File is written with a 2-second debounce to coalesce rapid updates
+- On SIGINT/SIGTERM, the map is flushed to disk before exit
+- Only HTTP requests (not responses) are tracked to avoid double-counting
+- Paths are limited to 100 unique values per integration to prevent unbounded growth
 
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:

@@ -87,6 +87,7 @@ type Runner struct {
 	targetPort          uint16
 	outputPath          string
 	envOutputPath       string
+	serviceMapPath      string
 	envPrefixes         []string
 	adiProfileAllowed   []string
 	seenPIDs            map[uint32]string // stores cmdline for each PID
@@ -96,13 +97,20 @@ type Runner struct {
 	containerResolver   *ContainerResolver
 	containerdSocket    string
 	containerdNamespace string
+	serviceMap          *ServiceMap
 }
 
-func NewRunner(port uint16, outputPath string, envOutputPath string, envPrefixes []string, adiProfileAllowed []string, containerdSocket string, containerdNamespace string) *Runner {
+func NewRunner(port uint16, outputPath string, envOutputPath string, serviceMapPath string, envPrefixes []string, adiProfileAllowed []string, containerdSocket string, containerdNamespace string) *Runner {
+	var serviceMap *ServiceMap
+	if serviceMapPath != "" {
+		serviceMap = NewServiceMap(serviceMapPath, 2*time.Second) // 2 second debounce
+	}
+
 	return &Runner{
 		targetPort:          port,
 		outputPath:          outputPath,
 		envOutputPath:       envOutputPath,
+		serviceMapPath:      serviceMapPath,
 		envPrefixes:         envPrefixes,
 		adiProfileAllowed:   adiProfileAllowed,
 		seenPIDs:            make(map[uint32]string),
@@ -111,6 +119,7 @@ func NewRunner(port uint16, outputPath string, envOutputPath string, envPrefixes
 		writtenPIDs:         make(map[uint32]bool),
 		containerdSocket:    containerdSocket,
 		containerdNamespace: containerdNamespace,
+		serviceMap:          serviceMap,
 	}
 }
 
@@ -374,6 +383,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	log.Printf("profiler attached, filtering for port %d, writing to %s", r.targetPort, r.outputPath)
 	log.Printf("environment variables will be written to %s", r.envOutputPath)
+	if r.serviceMap != nil {
+		log.Printf("service integration map will be written to %s", r.serviceMapPath)
+	}
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
@@ -392,11 +404,24 @@ func (r *Runner) Run(ctx context.Context) error {
 		rd.Close()
 	}()
 
+	// Helper to flush service map on exit
+	flushServiceMap := func() {
+		if r.serviceMap != nil {
+			log.Printf("flushing service integration map...")
+			if err := r.serviceMap.Close(); err != nil {
+				log.Printf("warning: failed to flush service map: %v", err)
+			} else {
+				log.Printf("service integration map written to %s", r.serviceMapPath)
+			}
+		}
+	}
+
 	for {
 		record, err := rd.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
 				log.Printf("ringbuf closed, exiting")
+				flushServiceMap()
 				return nil
 			}
 			return fmt.Errorf("read ringbuf: %w", err)
@@ -466,9 +491,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			log.Printf("context done, exiting")
+			flushServiceMap()
 			return nil
 		case <-signals:
 			log.Printf("signal received, exiting")
+			flushServiceMap()
 			return nil
 		default:
 		}
@@ -570,6 +597,37 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			} else {
 				event.DestinationType = "external"
 			}
+		}
+
+		// Record integration for service map (only for requests, not responses)
+		if r.serviceMap != nil && parsed.Method != "" {
+			srcService := ""
+			srcImage := ""
+			dstService := ""
+			dstImage := ""
+
+			if event.SourceContainer != nil {
+				srcService = event.SourceContainer.Service
+				if srcService == "" {
+					srcService = event.SourceContainer.ContainerName
+				}
+				srcImage = event.SourceContainer.Image
+			}
+
+			if event.DestinationContainer != nil {
+				dstService = event.DestinationContainer.Service
+				if dstService == "" {
+					dstService = event.DestinationContainer.ContainerName
+				}
+				dstImage = event.DestinationContainer.Image
+			}
+
+			r.serviceMap.RecordIntegration(
+				srcService, srcImage,
+				dstService, dstImage,
+				event.DestinationType,
+				parsed.Method, parsed.URL,
+			)
 		}
 	}
 

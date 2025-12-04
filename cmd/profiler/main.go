@@ -16,6 +16,7 @@ func main() {
 	port := uint16(envAsInt("HTTP_PORT", 8080))
 	output := envOrDefault("OUTPUT_PATH", "/var/log/ebpf_http_profiler.log")
 	envOutput := envOrDefault("ENV_OUTPUT_PATH", "/var/log/ebpf_http_env.yaml")
+	serviceMapOutput := envOrDefault("SERVICE_MAP_PATH", "")
 
 	// Parse comma-separated prefix list
 	var envPrefixes []string
@@ -43,7 +44,7 @@ func main() {
 	containerdSocket := envOrDefault("CONTAINERD_SOCKET", "")
 	containerdNamespace := envOrDefault("CONTAINERD_NAMESPACE", "default")
 
-	if err := profiler.NewRunner(port, output, envOutput, envPrefixes, adiProfileAllowed, containerdSocket, containerdNamespace).Run(context.Background()); err != nil {
+	if err := profiler.NewRunner(port, output, envOutput, serviceMapOutput, envPrefixes, adiProfileAllowed, containerdSocket, containerdNamespace).Run(context.Background()); err != nil {
 		log.Fatalf("profiler failed: %v", err)
 	}
 }
