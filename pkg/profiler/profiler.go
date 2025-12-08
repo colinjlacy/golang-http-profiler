@@ -321,6 +321,18 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := attachTracepoint("syscalls", "sys_enter_connect", objs.TraceSysEnterConnect); err != nil {
 		return fmt.Errorf("attach sys_enter_connect: %w", err)
 	}
+	if err := attachTracepoint("syscalls", "sys_exit_connect", objs.TraceSysExitConnect); err != nil {
+		return fmt.Errorf("attach sys_exit_connect: %w", err)
+	}
+
+	// Attach kprobe on tcp_connect to capture source port
+	kp, err := link.Kprobe("tcp_connect", objs.KprobeTcpConnect, nil)
+	if err != nil {
+		log.Printf("warning: failed to attach kprobe tcp_connect: %v (source ports may not be captured)", err)
+	} else {
+		links = append(links, kp)
+	}
+
 	if err := attachTracepoint("syscalls", "sys_enter_accept4", objs.TraceSysEnterAccept4); err != nil {
 		return fmt.Errorf("attach sys_enter_accept4: %w", err)
 	}
@@ -599,8 +611,8 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			}
 		}
 
-		// Record integration for service map (only for requests, not responses)
-		if r.serviceMap != nil && parsed.Method != "" {
+		// Record HTTP event for service map (handles both requests and responses for correlation)
+		if r.serviceMap != nil {
 			srcService := ""
 			srcImage := ""
 			dstService := ""
@@ -622,12 +634,23 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 				dstImage = event.DestinationContainer.Image
 			}
 
-			r.serviceMap.RecordIntegration(
-				srcService, srcImage,
-				dstService, dstImage,
-				event.DestinationType,
-				parsed.Method, parsed.URL,
-			)
+			r.serviceMap.RecordHTTPEvent(HTTPEventInfo{
+				Direction:  dir,
+				SourceIP:   saddr.String(),
+				SourcePort: sport,
+				DestIP:     daddr.String(),
+				DestPort:   dport,
+				PID:        ev.Pid,
+				Method:     parsed.Method,
+				URL:        parsed.URL,
+				StatusCode: parsed.StatusCode,
+				Body:       parsed.Body,
+				SrcService: srcService,
+				SrcImage:   srcImage,
+				DstService: dstService,
+				DstImage:   dstImage,
+				DstType:    event.DestinationType,
+			})
 		}
 	}
 

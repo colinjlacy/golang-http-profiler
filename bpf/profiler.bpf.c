@@ -9,9 +9,33 @@
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include <bpf/bpf_core_read.h>
 
 #include <stdbool.h>
 #include <stddef.h>
+
+// Architecture-specific pt_regs definition and parameter access for kprobes
+#if defined(__TARGET_ARCH_x86)
+struct pt_regs {
+    unsigned long r15, r14, r13, r12;
+    unsigned long bp, bx;
+    unsigned long r11, r10, r9, r8;
+    unsigned long ax, cx, dx, si, di;
+    unsigned long orig_ax;
+    unsigned long ip, cs, flags, sp, ss;
+};
+#define KPROBE_PARM1(ctx) ((ctx)->di)
+#elif defined(__TARGET_ARCH_arm64)
+struct pt_regs {
+    __u64 regs[31];
+    __u64 sp;
+    __u64 pc;
+    __u64 pstate;
+};
+#define KPROBE_PARM1(ctx) ((ctx)->regs[0])
+#else
+#error "Unsupported architecture"
+#endif
 
 #ifndef AF_INET
 #define AF_INET  2
@@ -20,7 +44,35 @@
 #define AF_INET6 10
 #endif
 
+// Minimal kernel struct definitions for socket access
+// These are stable across kernel versions for the fields we need
 
+struct sock_common {
+    union {
+        struct {
+            __be32 skc_daddr;
+            __be32 skc_rcv_saddr;
+        };
+    };
+    union {
+        struct {
+            __be16 skc_dport;
+            __u16 skc_num;  // local port in host byte order
+        };
+    };
+    short unsigned int skc_family;
+} __attribute__((preserve_access_index));
+
+struct sock {
+    struct sock_common __sk_common;
+} __attribute__((preserve_access_index));
+
+struct inet_sock {
+    struct sock sk;
+} __attribute__((preserve_access_index));
+
+// For IPv6, we need additional offset. Using a simpler approach:
+// Read from known offsets that are stable across kernels
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
@@ -91,6 +143,18 @@ struct {
     __type(value, struct conn_info);
     __uint(max_entries, 16384);
 } conn_map SEC(".maps");
+
+// Map to store fd for connect syscalls, keyed by pid_tgid
+struct connect_args {
+    int fd;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u64);
+    __type(value, struct connect_args);
+    __uint(max_entries, 10240);
+} connect_args_map SEC(".maps");
 
 // Generic tracepoint context for sys_enter_*
 // Matches the format described in
@@ -257,12 +321,41 @@ int trace_sys_enter_bind(struct sys_enter_args *ctx)
 SEC("tracepoint/syscalls/sys_enter_connect")
 int trace_sys_enter_connect(struct sys_enter_args *ctx)
 {
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
     int fd = (int)ctx->args[0];
     struct sockaddr *uservaddr = (struct sockaddr *)ctx->args[1];
 
     __u64 key = make_key(pid, fd);
     maybe_update_conn_from_addr(key, uservaddr, true);
+
+    // Store fd for sys_exit_connect to use
+    struct connect_args args = { .fd = fd };
+    bpf_map_update_elem(&connect_args_map, &pid_tgid, &args, BPF_ANY);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_connect")
+int trace_sys_exit_connect(struct sys_exit_args *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+    long ret = ctx->ret;
+
+    struct connect_args *args = bpf_map_lookup_elem(&connect_args_map, &pid_tgid);
+    if (!args) {
+        return 0;
+    }
+    int fd = args->fd;
+    bpf_map_delete_elem(&connect_args_map, &pid_tgid);
+
+    // Only proceed if connect succeeded (ret == 0) or is in progress (EINPROGRESS = -115)
+    if (ret != 0 && ret != -115) {
+        return 0;
+    }
+
+    // The source port is now assigned by the kernel
+    // We'll capture it via the tcp_connect kprobe which has direct socket access
     return 0;
 }
 
@@ -608,5 +701,72 @@ int trace_sys_exit_recvmsg(struct sys_exit_args *ctx)
 
     // Note: similar to sendmsg, we'd need to parse msghdr to get actual data
     // For now, we track that recvmsg happened but don't capture payload
+    return 0;
+}
+
+/* -------------------- tcp_connect kprobe -------------------- */
+// This kprobe fires when tcp_connect is called, giving us access to the socket
+// structure where we can read the assigned source port
+//
+// tcp_connect signature: int tcp_connect(struct sock *sk)
+// On ARM64, first argument is in x0 register
+// On x86_64, first argument is in rdi register
+
+SEC("kprobe/tcp_connect")
+int kprobe_tcp_connect(struct pt_regs *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
+
+    // Look up the fd we stored in sys_enter_connect
+    struct connect_args *args = bpf_map_lookup_elem(&connect_args_map, &pid_tgid);
+    if (!args) {
+        return 0;
+    }
+
+    int fd = args->fd;
+    __u64 key = make_key(pid, fd);
+
+    // Get first argument (struct sock *sk)
+    // KPROBE_PARM1 reads the first function argument from the correct register
+    struct sock *sk = (struct sock *)KPROBE_PARM1(ctx);
+    if (!sk) {
+        return 0;
+    }
+
+    // Read socket info
+    __u16 family = 0;
+    __u16 sport = 0;
+    __u32 saddr4 = 0;
+
+    // Read family
+    bpf_probe_read_kernel(&family, sizeof(family), &sk->__sk_common.skc_family);
+
+    // Read source port (skc_num is in host byte order)
+    bpf_probe_read_kernel(&sport, sizeof(sport), &sk->__sk_common.skc_num);
+
+    // Read source address (IPv4)
+    bpf_probe_read_kernel(&saddr4, sizeof(saddr4), &sk->__sk_common.skc_rcv_saddr);
+
+    // Update connection map with source info
+    struct conn_info *existing = bpf_map_lookup_elem(&conn_map, &key);
+    if (existing) {
+        // Convert host byte order port to network byte order for consistency
+        existing->sport = __builtin_bswap16(sport);
+        if (family == AF_INET) {
+            copy_bytes(existing->saddr, (const __u8 *)&saddr4, 4);
+        }
+        existing->family = family;
+        bpf_map_update_elem(&conn_map, &key, existing, BPF_ANY);
+    } else {
+        struct conn_info info = {};
+        info.family = family;
+        info.sport = __builtin_bswap16(sport);
+        if (family == AF_INET) {
+            copy_bytes(info.saddr, (const __u8 *)&saddr4, 4);
+        }
+        bpf_map_update_elem(&conn_map, &key, &info, BPF_ANY);
+    }
+
     return 0;
 }

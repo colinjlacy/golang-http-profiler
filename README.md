@@ -279,7 +279,7 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 
 ### Service Integration Map (JSON)
 
-**When `SERVICE_MAP_PATH` is configured**, a service integration map is maintained that tracks unique service-to-service connections:
+**When `SERVICE_MAP_PATH` is configured**, a service integration map is maintained that tracks unique service-to-service connections with full request/response schema extraction:
 
 ```json
 {
@@ -288,36 +288,67 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
     {
       "source_service": "productpage",
       "source_image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
-      "destination_service": "details",
-      "destination_image": "docker.io/istio/examples-bookinfo-details-v1:1.20.1",
+      "destination_service": "reviews",
+      "destination_image": "docker.io/istio/examples-bookinfo-reviews-v1:1.20.1",
       "destination_type": "container",
-      "methods": ["GET"],
-      "paths": ["/details/0", "/details/1"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/reviews/0",
+          "request_schema": null,
+          "response_schema": {
+            "clustername": "string",
+            "id": "string",
+            "podname": "string",
+            "reviews": [
+              {
+                "reviewer": "string",
+                "text": "string"
+              }
+            ]
+          },
+          "first_seen": "2024-04-08T18:24:10.000000000Z",
+          "last_seen": "2024-04-08T18:30:00.000000000Z",
+          "count": 150
+        }
+      ],
       "first_seen": "2024-04-08T18:24:10.000000000Z",
-      "last_seen": "2024-04-08T18:30:00.000000000Z",
-      "count": 150
+      "last_seen": "2024-04-08T18:30:00.000000000Z"
     },
     {
-      "source_service": "productpage",
-      "source_image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
+      "source_service": "ratings",
+      "source_image": "docker.io/istio/examples-bookinfo-ratings-v1:1.20.1",
       "destination_service": "external",
       "destination_type": "external",
-      "methods": ["GET"],
-      "paths": ["/api/external"],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/ratings/0",
+          "request_schema": {
+            "rating": "number",
+            "reviewer": "string"
+          },
+          "response_schema": "non-json",
+          "first_seen": "2024-04-08T18:25:00.000000000Z",
+          "last_seen": "2024-04-08T18:29:00.000000000Z",
+          "count": 10
+        }
+      ],
       "first_seen": "2024-04-08T18:25:00.000000000Z",
-      "last_seen": "2024-04-08T18:29:00.000000000Z",
-      "count": 10
+      "last_seen": "2024-04-08T18:29:00.000000000Z"
     }
   ]
 }
 ```
 
 **How it works:**
-- The map is updated in-memory whenever a new HTTP request is detected
+- Each unique `method + path` combination is tracked as a separate endpoint
+- Request/response correlation uses source port matching to pair requests with their responses
+- JSON schemas are extracted showing structure (keys and types) without values
+- Schema variants are preserved: if an endpoint returns different response shapes, each is tracked separately
+- Non-JSON bodies are marked as `"non-json"`, empty bodies as `null`
 - File is written with a 2-second debounce to coalesce rapid updates
 - On SIGINT/SIGTERM, the map is flushed to disk before exit
-- Only HTTP requests (not responses) are tracked to avoid double-counting
-- Paths are limited to 100 unique values per integration to prevent unbounded growth
 
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:
