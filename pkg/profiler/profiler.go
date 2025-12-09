@@ -937,6 +937,7 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 		}
 
 		r.serviceMap.RecordConnectionEvent(ConnectionEventInfo{
+			Direction:  dir,
 			SrcService: srcService,
 			SrcImage:   srcImage,
 			DstService: dstService,
