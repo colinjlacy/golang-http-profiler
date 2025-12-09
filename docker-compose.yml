@@ -12,6 +12,30 @@ services:
     ports:
       - "8080:8080"
 
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_DB=testdb
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   traffic:
     build:
       context: .
@@ -23,5 +47,18 @@ services:
       - HTTP_PORT=8080
       - TOTAL_REQUESTS=10
       - REQUEST_DELAY_MS=500
+      # Database connection settings
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_DB=testdb
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
-      - http-service
+      http-service:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

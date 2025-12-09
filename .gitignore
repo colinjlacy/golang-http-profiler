@@ -3,6 +3,6 @@ output/*
 pkg/profiler/profiler_bpf*
 .DS_Store
 .idea/
-profiler
+# profiler
 server
 traffic

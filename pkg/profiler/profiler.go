@@ -83,6 +83,27 @@ type HTTPEvent struct {
 	DestinationType      string            `json:"destination_type,omitempty"` // "container" or "external"
 }
 
+// ConnectionEvent represents a non-HTTP connection (database, cache, message bus)
+type ConnectionEvent struct {
+	Timestamp            string         `json:"timestamp"`
+	EventType            string         `json:"event_type"` // "connection"
+	PID                  uint32         `json:"pid"`
+	Comm                 string         `json:"comm"`
+	Cmdline              string         `json:"cmdline"`
+	Direction            string         `json:"direction"`
+	SourceIP             string         `json:"source_ip"`
+	SourcePort           uint16         `json:"source_port"`
+	DestIP               string         `json:"dest_ip"`
+	DestPort             uint16         `json:"dest_port"`
+	Protocol             string         `json:"protocol"`         // e.g., "postgres", "mysql"
+	Category             string         `json:"category"`         // e.g., "database", "cache"
+	Confidence           int            `json:"confidence"`       // 0-100
+	DetectionReason      string         `json:"detection_reason"` // Why this protocol was detected
+	SourceContainer      *ContainerInfo `json:"source_container,omitempty"`
+	DestinationContainer *ContainerInfo `json:"destination_container,omitempty"`
+	DestinationType      string         `json:"destination_type,omitempty"` // "container" or "external"
+}
+
 type Runner struct {
 	targetPort          uint16
 	outputPath          string
@@ -98,6 +119,7 @@ type Runner struct {
 	containerdSocket    string
 	containerdNamespace string
 	serviceMap          *ServiceMap
+	connTracker         *ConnTracker // tracks connections for protocol classification
 }
 
 func NewRunner(port uint16, outputPath string, envOutputPath string, serviceMapPath string, envPrefixes []string, adiProfileAllowed []string, containerdSocket string, containerdNamespace string) *Runner {
@@ -120,6 +142,7 @@ func NewRunner(port uint16, outputPath string, envOutputPath string, serviceMapP
 		containerdSocket:    containerdSocket,
 		containerdNamespace: containerdNamespace,
 		serviceMap:          serviceMap,
+		connTracker:         NewConnTracker(5 * time.Minute), // 5 minute TTL for connections
 	}
 }
 
@@ -441,64 +464,119 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		ev := (*Event)(unsafe.Pointer(&record.RawSample[0]))
 
+		// Check if this is HTTP traffic on the target port (original behavior)
+		portMatch := r.portMatches(ev)
+
+		// Check if this is traffic on an interesting port for connection classification
+		dport := ntohs(ev.Dport)
+		interestingPort := isInterestingPort(dport)
+
+		// Skip events that don't match either criteria
+		if !portMatch && !interestingPort {
+			continue
+		}
+
+		// Try to parse as HTTP
 		parsed := parseHTTP(ev)
+		isHTTP := portMatch && isHTTPTraffic(ev, parsed)
 
-		// Filter: only output if we successfully parsed HTTP data
-		if !isHTTPTraffic(ev, parsed) {
-			continue
-		}
+		// For HTTP traffic on target port, use the original flow
+		if isHTTP {
+			// Check opt-in criteria for new PIDs
+			if _, seen := r.seenPIDs[ev.Pid]; !seen {
+				shouldProfile, adiProfileValue, adiProfileName := r.shouldProfilePID(ev.Pid)
 
-		// Check opt-in criteria for new PIDs
-		if _, seen := r.seenPIDs[ev.Pid]; !seen {
-			shouldProfile, adiProfileValue, adiProfileName := r.shouldProfilePID(ev.Pid)
+				// Read cmdline once for this PID
+				cmdline := ""
+				cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", ev.Pid)
+				if data, err := os.ReadFile(cmdlinePath); err == nil && len(data) > 0 {
+					cmdline = strings.ReplaceAll(string(data), "\x00", " ")
+					cmdline = strings.TrimSpace(cmdline)
+				} else if err != nil {
+					cmdline = fmt.Sprintf("[cmdline error: %v]", err)
+				} else {
+					cmdline = "[cmdline empty]"
+				}
 
-			// Read cmdline once for this PID
-			cmdline := ""
-			cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", ev.Pid)
-			if data, err := os.ReadFile(cmdlinePath); err == nil && len(data) > 0 {
-				// /proc/<pid>/cmdline is null-separated. Replace with spaces and trim
-				cmdline = strings.ReplaceAll(string(data), "\x00", " ")
-				cmdline = strings.TrimSpace(cmdline)
-			} else if err != nil {
-				cmdline = fmt.Sprintf("[cmdline error: %v]", err)
+				if !shouldProfile {
+					r.seenPIDs[ev.Pid] = cmdline
+					continue
+				}
+
+				r.seenPIDs[ev.Pid] = cmdline
+				r.pidAdiProfiles[ev.Pid] = adiProfileValue
+				if adiProfileName != "" {
+					r.pidNames[ev.Pid] = adiProfileName
+				}
 			} else {
-				cmdline = "[cmdline empty]"
+				if _, hasProfile := r.pidAdiProfiles[ev.Pid]; !hasProfile {
+					continue
+				}
 			}
 
-			if !shouldProfile {
-				// Silently skip this PID - it doesn't meet opt-in criteria
-				r.seenPIDs[ev.Pid] = cmdline // Mark as seen with cmdline so we don't check again
+			// Collect environment variables for new PIDs
+			r.collectAndWriteEnv(ev.Pid, envFile)
+
+			jsonLine, err := r.formatEventJSON(ev, parsed)
+			if err != nil {
+				log.Printf("error formatting HTTP event: %v", err)
 				continue
 			}
 
-			// Store the cmdline, ADI_PROFILE value, and ADI_PROFILE_NAME for this PID
-			r.seenPIDs[ev.Pid] = cmdline
-			r.pidAdiProfiles[ev.Pid] = adiProfileValue
-			if adiProfileName != "" {
-				r.pidNames[ev.Pid] = adiProfileName
+			if _, err := writer.WriteString(jsonLine + "\n"); err != nil {
+				log.Printf("error writing line: %v", err)
+				return fmt.Errorf("write log: %w", err)
 			}
-		} else {
-			// For already-seen PIDs, check if they passed opt-in
-			if _, hasProfile := r.pidAdiProfiles[ev.Pid]; !hasProfile {
-				// This PID was previously rejected
+			writer.Flush()
+		} else if interestingPort {
+			// For non-HTTP traffic on interesting ports, try connection classification
+			// First check opt-in (reuse same logic)
+			if _, seen := r.seenPIDs[ev.Pid]; !seen {
+				shouldProfile, adiProfileValue, adiProfileName := r.shouldProfilePID(ev.Pid)
+
+				cmdline := ""
+				cmdlinePath := fmt.Sprintf("/proc/%d/cmdline", ev.Pid)
+				if data, err := os.ReadFile(cmdlinePath); err == nil && len(data) > 0 {
+					cmdline = strings.ReplaceAll(string(data), "\x00", " ")
+					cmdline = strings.TrimSpace(cmdline)
+				} else if err != nil {
+					cmdline = fmt.Sprintf("[cmdline error: %v]", err)
+				} else {
+					cmdline = "[cmdline empty]"
+				}
+
+				if !shouldProfile {
+					r.seenPIDs[ev.Pid] = cmdline
+					continue
+				}
+
+				r.seenPIDs[ev.Pid] = cmdline
+				r.pidAdiProfiles[ev.Pid] = adiProfileValue
+				if adiProfileName != "" {
+					r.pidNames[ev.Pid] = adiProfileName
+				}
+			} else {
+				if _, hasProfile := r.pidAdiProfiles[ev.Pid]; !hasProfile {
+					continue
+				}
+			}
+
+			// Try connection classification
+			jsonLine, err := r.tryClassifyAndFormatConnection(ev)
+			if err != nil || jsonLine == "" {
+				// Classification failed or not applicable, skip silently
 				continue
 			}
-		}
 
-		// Collect environment variables for new PIDs
-		r.collectAndWriteEnv(ev.Pid, envFile)
+			// Collect environment variables for new PIDs
+			r.collectAndWriteEnv(ev.Pid, envFile)
 
-		jsonLine, err := r.formatEventJSON(ev, parsed)
-		if err != nil {
-			log.Printf("error formatting event: %v", err)
-			continue
+			if _, err := writer.WriteString(jsonLine + "\n"); err != nil {
+				log.Printf("error writing line: %v", err)
+				return fmt.Errorf("write log: %w", err)
+			}
+			writer.Flush()
 		}
-
-		if _, err := writer.WriteString(jsonLine + "\n"); err != nil {
-			log.Printf("error writing line: %v", err)
-			return fmt.Errorf("write log: %w", err)
-		}
-		writer.Flush()
 
 		select {
 		case <-ctx.Done():
@@ -523,6 +601,35 @@ func ntohs(v uint16) uint16 {
 
 func (r *Runner) portMatches(ev *Event) bool {
 	return ntohs(ev.Sport) == r.targetPort || ntohs(ev.Dport) == r.targetPort
+}
+
+// isInterestingPort returns true if the port is associated with a database, cache, or message bus
+func isInterestingPort(port uint16) bool {
+	switch port {
+	// Databases
+	case 5432: // PostgreSQL
+		return true
+	case 3306: // MySQL/MariaDB
+		return true
+	case 27017: // MongoDB
+		return true
+	case 1433: // MSSQL
+		return true
+	// Caches
+	case 6379, 26379: // Redis, Redis Sentinel
+		return true
+	case 11211: // Memcached
+		return true
+	// Message buses
+	case 9092, 19092, 29092, 9093: // Kafka
+		return true
+	case 5672, 5671: // AMQP/RabbitMQ
+		return true
+	case 4222, 6222: // NATS
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
@@ -611,47 +718,236 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			}
 		}
 
-		// Record HTTP event for service map (handles both requests and responses for correlation)
-		if r.serviceMap != nil {
-			srcService := ""
-			srcImage := ""
-			dstService := ""
-			dstImage := ""
+	}
 
-			if event.SourceContainer != nil {
-				srcService = event.SourceContainer.Service
-				if srcService == "" {
-					srcService = event.SourceContainer.ContainerName
-				}
-				srcImage = event.SourceContainer.Image
+	// Record HTTP event for service map (handles both requests and responses for correlation)
+	if r.serviceMap != nil {
+		srcService := ""
+		srcImage := ""
+		dstService := ""
+		dstImage := ""
+		dstType := event.DestinationType
+
+		if event.SourceContainer != nil {
+			srcService = event.SourceContainer.Service
+			if srcService == "" {
+				srcService = event.SourceContainer.ContainerName
 			}
-
-			if event.DestinationContainer != nil {
-				dstService = event.DestinationContainer.Service
-				if dstService == "" {
-					dstService = event.DestinationContainer.ContainerName
-				}
-				dstImage = event.DestinationContainer.Image
+			srcImage = event.SourceContainer.Image
+		} else {
+			// Use PID name if available from opt-in
+			if name, ok := r.pidNames[ev.Pid]; ok && name != "" {
+				srcService = name
 			}
-
-			r.serviceMap.RecordHTTPEvent(HTTPEventInfo{
-				Direction:  dir,
-				SourceIP:   saddr.String(),
-				SourcePort: sport,
-				DestIP:     daddr.String(),
-				DestPort:   dport,
-				PID:        ev.Pid,
-				Method:     parsed.Method,
-				URL:        parsed.URL,
-				StatusCode: parsed.StatusCode,
-				Body:       parsed.Body,
-				SrcService: srcService,
-				SrcImage:   srcImage,
-				DstService: dstService,
-				DstImage:   dstImage,
-				DstType:    event.DestinationType,
-			})
 		}
+
+		if event.DestinationContainer != nil {
+			dstService = event.DestinationContainer.Service
+			if dstService == "" {
+				dstService = event.DestinationContainer.ContainerName
+			}
+			dstImage = event.DestinationContainer.Image
+		}
+
+		// Default destination type if not set
+		if dstType == "" {
+			dstType = "unknown"
+		}
+
+		r.serviceMap.RecordHTTPEvent(HTTPEventInfo{
+			Direction:  dir,
+			SourceIP:   saddr.String(),
+			SourcePort: sport,
+			DestIP:     daddr.String(),
+			DestPort:   dport,
+			PID:        ev.Pid,
+			Method:     parsed.Method,
+			URL:        parsed.URL,
+			StatusCode: parsed.StatusCode,
+			Body:       parsed.Body,
+			SrcService: srcService,
+			SrcImage:   srcImage,
+			DstService: dstService,
+			DstImage:   dstImage,
+			DstType:    dstType,
+		})
+	}
+
+	jsonBytes, err := json.Marshal(event)
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
+}
+
+// tryClassifyAndFormatConnection attempts to classify a non-HTTP connection
+// and format it as a ConnectionEvent JSON line.
+func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
+	sport := ntohs(ev.Sport)
+	dport := ntohs(ev.Dport)
+	saddr := ipFromBytes(ev.Family, ev.Saddr[:])
+	daddr := ipFromBytes(ev.Family, ev.Daddr[:])
+
+	// Build connection key
+	connKey := ConnKey{
+		LocalIP:    saddr,
+		LocalPort:  sport,
+		RemoteIP:   daddr,
+		RemotePort: dport,
+	}
+
+	// Build connection metadata for classification
+	meta := ConnMeta{
+		PID:        ev.Pid,
+		LocalIP:    saddr,
+		LocalPort:  sport,
+		RemoteIP:   daddr,
+		RemotePort: dport,
+		IsTLS:      false, // TODO: detect TLS handshake if needed
+	}
+
+	// Get payload data
+	payload := ev.Data[:ev.DataLen]
+
+	// Attempt classification
+	result, isFirstClassification := r.connTracker.Classify(connKey, ev.Pid, meta, payload)
+
+	// Only emit events for classified connections with at least medium confidence
+	if !result.Matched || result.Confidence < ConfidenceMedium {
+		return "", nil
+	}
+
+	// Skip HTTP category - those are handled by formatEventJSON
+	if result.Category == CategoryHTTP {
+		return "", nil
+	}
+
+	// Only emit on first classification to avoid duplicates
+	if !isFirstClassification {
+		return "", nil
+	}
+
+	dir := "send"
+	if ev.Direction == dirRecv {
+		dir = "recv"
+	}
+
+	// Get the stored cmdline for this PID
+	cmdline := r.seenPIDs[ev.Pid]
+
+	event := ConnectionEvent{
+		Timestamp:       time.Unix(0, int64(ev.Ts)).Format(time.RFC3339Nano),
+		EventType:       "connection",
+		PID:             ev.Pid,
+		Comm:            strings.Trim(string(ev.Comm[:]), "\x00"),
+		Cmdline:         cmdline,
+		Direction:       dir,
+		SourceIP:        saddr.String(),
+		SourcePort:      sport,
+		DestIP:          daddr.String(),
+		DestPort:        dport,
+		Protocol:        string(result.Protocol),
+		Category:        string(result.Category),
+		Confidence:      int(result.Confidence),
+		DetectionReason: result.Reason,
+	}
+
+	// Enrich with container metadata if resolver is available
+	if r.containerResolver != nil {
+		if ev.Direction == dirSend {
+			// Send event: PID is sender, dest IP is receiver
+			if srcMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); srcMeta != nil {
+				event.SourceContainer = &ContainerInfo{
+					Service:       srcMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
+					ContainerID:   srcMeta.ContainerID,
+					ContainerName: srcMeta.ContainerName,
+				}
+			}
+
+			if dstMeta := r.containerResolver.ResolveDestination(daddr, dport); dstMeta != nil {
+				event.DestinationContainer = &ContainerInfo{
+					Service:       dstMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
+					ContainerID:   dstMeta.ContainerID,
+					ContainerName: dstMeta.ContainerName,
+				}
+				event.DestinationType = "container"
+			} else {
+				event.DestinationType = "external"
+			}
+		} else {
+			// Recv event: PID is receiver, source IP is sender
+			if srcMeta := r.containerResolver.ResolveDestination(saddr, sport); srcMeta != nil {
+				event.SourceContainer = &ContainerInfo{
+					Service:       srcMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
+					ContainerID:   srcMeta.ContainerID,
+					ContainerName: srcMeta.ContainerName,
+				}
+			}
+
+			if dstMeta := r.containerResolver.ResolvePIDToContainer(ev.Pid); dstMeta != nil {
+				event.DestinationContainer = &ContainerInfo{
+					Service:       dstMeta.Service,
+					Image:         fmt.Sprintf("%s:%s", dstMeta.Image, dstMeta.ImageTag),
+					ContainerID:   dstMeta.ContainerID,
+					ContainerName: dstMeta.ContainerName,
+				}
+				event.DestinationType = "container"
+			} else {
+				event.DestinationType = "external"
+			}
+		}
+
+	}
+
+	// Record connection event for service map
+	if r.serviceMap != nil {
+		srcService := ""
+		srcImage := ""
+		dstService := ""
+		dstImage := ""
+		dstType := event.DestinationType
+
+		if event.SourceContainer != nil {
+			srcService = event.SourceContainer.Service
+			if srcService == "" {
+				srcService = event.SourceContainer.ContainerName
+			}
+			srcImage = event.SourceContainer.Image
+		} else {
+			// Use PID name if available from opt-in
+			if name, ok := r.pidNames[ev.Pid]; ok && name != "" {
+				srcService = name
+			}
+		}
+
+		if event.DestinationContainer != nil {
+			dstService = event.DestinationContainer.Service
+			if dstService == "" {
+				dstService = event.DestinationContainer.ContainerName
+			}
+			dstImage = event.DestinationContainer.Image
+		}
+
+		// Default destination type if not set
+		if dstType == "" {
+			dstType = "external"
+		}
+
+		r.serviceMap.RecordConnectionEvent(ConnectionEventInfo{
+			SrcService: srcService,
+			SrcImage:   srcImage,
+			DstService: dstService,
+			DstImage:   dstImage,
+			DstType:    dstType,
+			Protocol:   event.Protocol,
+			Category:   event.Category,
+			Port:       dport,
+			Confidence: event.Confidence,
+			Reason:     event.DetectionReason,
+		})
 	}
 
 	jsonBytes, err := json.Marshal(event)
