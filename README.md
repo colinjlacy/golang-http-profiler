@@ -205,7 +205,7 @@ You can run the profiler first, and it'll hang out waiting for any network traff
 
 ## Go Big(-ish)
 
-I've got [another repo](https://github.com/colinjlacy/bookinfo-docker-compose) that puts the [Istio Bookinfo](https://github.com/colinjlacy/bookinfo-docker-compose) demo into a docker-compose file. 
+I've got [another repo](https://github.com/colinjlacy/bookinfo-docker-compose) that puts the [Istio Bookinfo](https://github.com/istio/istio/tree/master/samples/bookinfo) demo into a docker-compose file. 
 
 To profile the Bookinfo services:
 
