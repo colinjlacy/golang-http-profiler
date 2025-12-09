@@ -9,8 +9,12 @@ services:
       - ADI_PROFILE=local
       - ADI_PROFILE_NAME=http-service
       - HTTP_PORT=8080
+      - NATS_URL=nats://nats-server:4222
     ports:
       - "8080:8080"
+    depends_on:
+      nats-server:
+        condition: service_healthy
 
   postgres:
     image: postgres:15-alpine
@@ -35,6 +39,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  nats-server:
+    image: nats:2-alpine
+    ports:
+      - "4222:4222"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: ["--http_port", "8222"]
+
+  request-logger:
+    build:
+      context: .
+      dockerfile: ./cmd/request-logger/Dockerfile
+    environment:
+      - ADI_PROFILE=local
+      - ADI_PROFILE_NAME=request-logger
+      - NATS_URL=nats://nats-server:4222
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      nats-server:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   traffic:
     build:
@@ -62,3 +93,5 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      request-logger:
+        condition: service_started
