@@ -12,7 +12,8 @@ It's a PoC in the service of [this initiative](https://github.com/cncf/toc/issue
 
 ## What it does:
 
-- Sets up an eBPF profiler to listen for HTTP events and logs the origin PID, to IP and port, from IPand port, method, data, response code, etc.
+- Sets up an eBPF profiler to listen for HTTP events and logs the origin PID, to IP and port, from IP and port, method, data, response code, etc.
+- Classifies non-HTTP connections (databases, caches, message buses) using port-based heuristics and protocol fingerprinting
 - For each PID found, pulls the environment variables assigned to the process
 - Writes the output of each to an output file
 
@@ -254,7 +255,51 @@ JSON lines with syscall-derived metadata and parsed HTTP fields:
 }
 ```
 
-Fields include parsed HTTP method, URL, status code (for responses), headers, request/response bodies, plus the complete raw payload from the syscalls. Only HTTP traffic is logged; UDP and non-HTTP TCP traffic is filtered out.
+Fields include parsed HTTP method, URL, status code (for responses), headers, request/response bodies, plus the complete raw payload from the syscalls.
+
+In addition to HTTP traffic, the profiler also classifies and logs non-HTTP connections to databases, caches, and message buses:
+
+```json
+{
+  "timestamp": "2024-04-08T18:24:10.123456789Z",
+  "event_type": "connection",
+  "pid": 1234,
+  "comm": "traffic-generat",
+  "cmdline": "/bin/traffic-generator",
+  "direction": "send",
+  "source_ip": "10.4.2.60",
+  "source_port": 38338,
+  "dest_ip": "10.4.2.59",
+  "dest_port": 5432,
+  "protocol": "postgres",
+  "category": "database",
+  "confidence": 90,
+  "detection_reason": "port 5432, valid Postgres startup/SSLRequest header"
+}
+```
+
+Connection events include:
+- `event_type`: Always `"connection"` for non-HTTP traffic
+- `protocol`: Detected protocol (e.g., `postgres`, `mysql`, `redis`, `kafka`)
+- `category`: High-level classification (`database`, `cache`, or `message_bus`)
+- `confidence`: Detection confidence score (0-100)
+- `detection_reason`: Explanation of how the protocol was identified
+
+**Supported Protocols and Ports:**
+
+| Category | Protocol | Default Ports |
+|----------|----------|---------------|
+| database | PostgreSQL | 5432 |
+| database | MySQL/MariaDB | 3306 |
+| database | MongoDB | 27017 |
+| database | MSSQL (TDS) | 1433 |
+| cache | Redis | 6379, 26379 |
+| cache | Memcached | 11211 |
+| message_bus | Kafka | 9092, 19092, 29092, 9093 |
+| message_bus | AMQP/RabbitMQ | 5672, 5671 |
+| message_bus | NATS | 4222, 6222 |
+
+Classification uses a combination of port-based heuristics and protocol fingerprinting on the first bytes of payload. When payload inspection confirms the protocol, confidence is high (90). When only port matching is available (e.g., TLS connections), confidence is medium (60).
 
 ### Container metadata fields
 
@@ -277,22 +322,21 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 
 **Note:** Some `recv` events may have `source_ip: "invalid IP"` when socket peer information isn't available. These events will only have `destination_container` populated. Full service-to-service mapping is captured in the corresponding `send` events.
 
-### Service Integration Map (JSON)
+### Service Map (JSON)
 
-**When `SERVICE_MAP_PATH` is configured**, a service integration map is maintained that tracks unique service-to-service connections with full request/response schema extraction:
+**When `SERVICE_MAP_PATH` is configured**, a service map is maintained that tracks each profiled service's outbound HTTP endpoints and non-HTTP connections (databases, caches, message buses):
 
 ```json
 {
   "generated_at": "2024-04-08T18:30:00.000000000Z",
-  "integrations": [
+  "services": [
     {
-      "source_service": "productpage",
-      "source_image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
-      "destination_service": "reviews",
-      "destination_image": "docker.io/istio/examples-bookinfo-reviews-v1:1.20.1",
-      "destination_type": "container",
+      "name": "productpage",
+      "image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
       "endpoints": [
         {
+          "destination": "reviews",
+          "destination_type": "container",
           "method": "GET",
           "path": "/reviews/0",
           "request_schema": null,
@@ -312,23 +356,48 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
           "count": 150
         }
       ],
+      "connections": [
+        {
+          "destination": "postgres",
+          "destination_type": "container",
+          "protocol": "postgres",
+          "category": "database",
+          "port": 5432,
+          "confidence": 90,
+          "reason": "port 5432, valid Postgres startup/SSLRequest header",
+          "first_seen": "2024-04-08T18:24:10.000000000Z",
+          "last_seen": "2024-04-08T18:30:00.000000000Z",
+          "count": 1
+        },
+        {
+          "destination": "redis",
+          "destination_type": "container",
+          "protocol": "redis",
+          "category": "cache",
+          "port": 6379,
+          "confidence": 90,
+          "reason": "redis RESP array",
+          "first_seen": "2024-04-08T18:24:10.000000000Z",
+          "last_seen": "2024-04-08T18:30:00.000000000Z",
+          "count": 1
+        }
+      ],
       "first_seen": "2024-04-08T18:24:10.000000000Z",
       "last_seen": "2024-04-08T18:30:00.000000000Z"
     },
     {
-      "source_service": "ratings",
-      "source_image": "docker.io/istio/examples-bookinfo-ratings-v1:1.20.1",
-      "destination_service": "external",
-      "destination_type": "external",
+      "name": "reviews",
+      "image": "docker.io/istio/examples-bookinfo-reviews-v1:1.20.1",
       "endpoints": [
         {
-          "method": "POST",
+          "destination": "ratings",
+          "destination_type": "container",
+          "method": "GET",
           "path": "/ratings/0",
-          "request_schema": {
-            "rating": "number",
-            "reviewer": "string"
+          "request_schema": null,
+          "response_schema": {
+            "rating": "number"
           },
-          "response_schema": "non-json",
           "first_seen": "2024-04-08T18:25:00.000000000Z",
           "last_seen": "2024-04-08T18:29:00.000000000Z",
           "count": 10
@@ -341,12 +410,39 @@ Fields include parsed HTTP method, URL, status code (for responses), headers, re
 }
 ```
 
+**Service Map Structure:**
+
+The map is organized by source service, with each service containing:
+- `name`: Service name (from Docker Compose label or `ADI_PROFILE_NAME`)
+- `image`: Container image with tag (when container metadata is available)
+- `endpoints`: HTTP endpoints called by this service
+- `connections`: Non-HTTP connections (databases, caches, message buses) made by this service
+- `first_seen` / `last_seen`: Timestamps of activity
+
+**Endpoint fields:**
+- `destination`: Target service name
+- `destination_type`: `"container"` or `"external"`
+- `method` / `path`: HTTP method and URL path
+- `request_schema` / `response_schema`: JSON structure (keys and types) without values
+- `count`: Number of times this endpoint was called
+
+**Connection fields:**
+- `destination`: Target service/host name
+- `destination_type`: `"container"` or `"external"`
+- `protocol`: Detected protocol (e.g., `postgres`, `redis`, `kafka`)
+- `category`: `"database"`, `"cache"`, or `"message_bus"`
+- `port`: Remote port number
+- `confidence`: Detection confidence (0-100)
+- `reason`: Explanation of protocol detection
+- `count`: Number of connection events observed
+
 **How it works:**
-- Each unique `method + path` combination is tracked as a separate endpoint
+- Each unique `destination + method + path` combination is tracked as a separate endpoint
 - Request/response correlation uses source port matching to pair requests with their responses
 - JSON schemas are extracted showing structure (keys and types) without values
 - Schema variants are preserved: if an endpoint returns different response shapes, each is tracked separately
 - Non-JSON bodies are marked as `"non-json"`, empty bodies as `null`
+- Non-HTTP connections are classified on first payload using port and protocol fingerprinting
 - File is written with a 2-second debounce to coalesce rapid updates
 - On SIGINT/SIGTERM, the map is flushed to disk before exit
 
