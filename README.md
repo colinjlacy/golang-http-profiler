@@ -167,19 +167,41 @@ sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
 
 **Step 2: Start services with opt-in flag**
 
-For the demo HTTP server and traffic generator, `ADI_PROFILE=local` has already been set in `docker-compose.yml`. Run them both with:
+The included `docker-compose.yml` sets up a demo microservices architecture with the following profiled services (all have `ADI_PROFILE=local`):
+
+- **http-service**: HTTP server that publishes request info to NATS
+- **request-logger**: Subscribes to NATS and stores requests in Redis
+- **traffic-generator**: Generates HTTP requests and database/cache operations
+
+And supporting infrastructure (not profiled):
+- **postgres**: PostgreSQL database
+- **redis**: Redis cache
+- **nats-server**: NATS message broker
+
+Run them all with:
 ```sh
 docker compose up -d
 # podman compose up -d
 # nerdctl compose up -d
 ```
 
-The profiler captures all HTTP traffic (both client and server side) from processes that meet the opt-in criteria. The traffic generator issues GET/POST traffic in a loop so you can see request/response bodies, methods, URLs, and status codes captured from syscall payloads.
+**What Gets Profiled:**
 
-The profiler also collects environment variables from each process making HTTP calls. As soon as a new PID is observed, the profiler reads `/proc/<pid>/environ` and writes the results to a separate YAML file.
+The profiler captures all HTTP traffic and non-HTTP connections from processes that meet the opt-in criteria:
 
-You can run the profiler first, and it'll hang out waiting for 
-any HTTP traffic to arrive via `syscall`. Or, if you start it while processes are sending traffic, it will profile for as long as it's running.
+- **HTTP endpoints** (in service map `endpoints` array):
+  - `traffic-generator` → `http-service` (GET /, GET /healthz, POST /echo, GET /slow)
+
+- **Database/Cache/Message Bus connections** (in service map `connections` array):
+  - `traffic-generator` → PostgreSQL (port 5432, category: database)
+  - `traffic-generator` → Redis (port 6379, category: cache)
+  - `http-service` → NATS (port 4222, category: message_bus)
+  - `request-logger` → NATS (port 4222, category: message_bus)
+  - `request-logger` → Redis (port 6379, category: cache)
+
+The profiler also collects environment variables from each process making network calls. As soon as a new PID is observed, the profiler reads `/proc/<pid>/environ` and writes the results to a separate YAML file.
+
+You can run the profiler first, and it'll hang out waiting for any network traffic to arrive via syscall. Or, if you start it while processes are sending traffic, it will profile for as long as it's running.
 
 ## Go Big(-ish)
 
