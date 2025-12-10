@@ -8,43 +8,45 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // EndpointInfo represents a unique destination+method+path combination with schema info
 type EndpointInfo struct {
-	Destination     string      `json:"destination"`                // destination service name
-	DestinationType string      `json:"destination_type,omitempty"` // "container", "external", or "unknown"
-	Method          string      `json:"method"`
-	Path            string      `json:"path"`
-	RequestSchema   interface{} `json:"request_schema"`  // null, "non-json", or JSON structure
-	ResponseSchema  interface{} `json:"response_schema"` // null, "non-json", or JSON structure
-	FirstSeen       time.Time   `json:"first_seen"`
-	LastSeen        time.Time   `json:"last_seen"`
-	Count           int64       `json:"count"`
+	Destination     string      `yaml:"destination"`                // destination service name
+	DestinationType string      `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
+	Method          string      `yaml:"method"`
+	Path            string      `yaml:"path"`
+	RequestSchema   interface{} `yaml:"request_schema"`  // null, "non-json", or JSON structure
+	ResponseSchema  interface{} `yaml:"response_schema"` // null, "non-json", or JSON structure
+	FirstSeen       time.Time   `yaml:"first_seen"`
+	LastSeen        time.Time   `yaml:"last_seen"`
+	Count           int64       `yaml:"count"`
 }
 
 // ConnectionInfo represents a non-HTTP connection (database, cache, message bus)
 type ConnectionInfo struct {
-	Destination     string    `json:"destination"`                // destination service/host name
-	DestinationType string    `json:"destination_type,omitempty"` // "container", "external", or "unknown"
-	Protocol        string    `json:"protocol"`                   // e.g., "postgres", "mysql", "redis"
-	Category        string    `json:"category"`                   // e.g., "database", "cache", "message_bus"
-	Port            uint16    `json:"port"`                       // Remote port
-	Confidence      int       `json:"confidence"`                 // 0-100 confidence score
-	Reason          string    `json:"reason,omitempty"`           // Detection reason
-	FirstSeen       time.Time `json:"first_seen"`
-	LastSeen        time.Time `json:"last_seen"`
-	Count           int64     `json:"count"`
+	Destination     string    `yaml:"destination"`                // destination service/host name
+	DestinationType string    `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
+	Protocol        string    `yaml:"protocol"`                   // e.g., "postgres", "mysql", "redis"
+	Category        string    `yaml:"category"`                   // e.g., "database", "cache", "message_bus"
+	Port            uint16    `yaml:"port"`                       // Remote port
+	Confidence      int       `yaml:"confidence"`                 // 0-100 confidence score
+	Reason          string    `yaml:"reason,omitempty"`           // Detection reason
+	FirstSeen       time.Time `yaml:"first_seen"`
+	LastSeen        time.Time `yaml:"last_seen"`
+	Count           int64     `yaml:"count"`
 }
 
 // ServiceProfile represents all outbound activity from a single service
 type ServiceProfile struct {
-	Name        string            `json:"name"`
-	Image       string            `json:"image,omitempty"`
-	Endpoints   []*EndpointInfo   `json:"endpoints,omitempty"`   // HTTP endpoints called
-	Connections []*ConnectionInfo `json:"connections,omitempty"` // Non-HTTP connections (databases, caches, etc.)
-	FirstSeen   time.Time         `json:"first_seen"`
-	LastSeen    time.Time         `json:"last_seen"`
+	Name        string            `yaml:"name"`
+	Image       string            `yaml:"image,omitempty"`
+	Endpoints   []*EndpointInfo   `yaml:"endpoints,omitempty"`   // HTTP endpoints called
+	Connections []*ConnectionInfo `yaml:"connections,omitempty"` // Non-HTTP connections (databases, caches, etc.)
+	FirstSeen   time.Time         `yaml:"first_seen"`
+	LastSeen    time.Time         `yaml:"last_seen"`
 }
 
 // PendingRequest stores request info while waiting for response
@@ -405,14 +407,14 @@ func (sm *ServiceMap) writeToFileLocked() error {
 	}
 
 	output := struct {
-		GeneratedAt time.Time         `json:"generated_at"`
-		Services    []*ServiceProfile `json:"services"`
+		GeneratedAt time.Time         `yaml:"generated_at"`
+		Services    []*ServiceProfile `yaml:"services"`
 	}{
 		GeneratedAt: time.Now(),
 		Services:    services,
 	}
 
-	data, err := json.MarshalIndent(output, "", "  ")
+	data, err := yaml.Marshal(output)
 	if err != nil {
 		return fmt.Errorf("marshal service map: %w", err)
 	}

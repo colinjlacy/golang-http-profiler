@@ -81,7 +81,7 @@ These environment variables configure the profiler itself:
 
 - `OUTPUT_PATH=/var/log/ebpf_http_profiler.log` - File path for HTTP event logs (JSON format)
 - `ENV_OUTPUT_PATH=/var/log/ebpf_http_env.yaml` - File path for environment variable logs (YAML format)
-- `SERVICE_MAP_PATH=""` - File path for service integration map (JSON format). If not set, service map is disabled.
+- `SERVICE_MAP_PATH=""` - File path for service integration map (YAML format). If not set, service map is disabled.
 - `ENV_PREFIX_LIST=""` - Comma-separated list of environment variable key prefixes to include (case-sensitive). If not set, all environment variables are collected.
 - `ADI_PROFILE_ALLOWED=""` - Comma-separated list of ADI_PROFILE values to profile (see Opt-In Profiling below). If not set, all processes with `ADI_PROFILE` set (any value) will be profiled.
 - `CONTAINERD_SOCKET=""` - Path to containerd or Docker socket. If not set, container metadata enrichment is disabled.
@@ -158,7 +158,7 @@ Profile with container metadata enrichment (service-to-service mapping):
 # using nerdctl rootless as an example for the container enrichment flags
 sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
      ENV_OUTPUT_PATH="/some/path/ebpf_env_profiler.yaml" \
-     SERVICE_MAP_PATH="/some/path/ebpf_service_map.json" \
+     SERVICE_MAP_PATH="/some/path/ebpf_service_map.yaml" \
      CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
      CONTAINERD_NAMESPACE="default" \
      ADI_PROFILE_ALLOWED="local,dev" \
@@ -214,7 +214,7 @@ To profile the Bookinfo services:
 ```sh
 sudo OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_http_profiler.log" \
      ENV_OUTPUT_PATH="/home/lima.linux/http-profiler/output/ebpf_env_profiler.yaml" \
-     SERVICE_MAP_PATH="/home/lima.linux/http-profiler/output/ebpf_service_map.json" \
+     SERVICE_MAP_PATH="/home/lima.linux/http-profiler/output/ebpf_service_map.yaml" \
      ENV_PREFIX_LIST="REVIEWS_,RATINGS_,MONGO_,DETAILS_" \
      ADI_PROFILE_ALLOWED="local,dev" \
      CONTAINERD_SOCKET="$XDG_RUNTIME_DIR/containerd/containerd.sock" \
@@ -344,92 +344,69 @@ Classification uses a combination of port-based heuristics and protocol fingerpr
 
 **Note:** Some `recv` events may have `source_ip: "invalid IP"` when socket peer information isn't available. These events will only have `destination_container` populated. Full service-to-service mapping is captured in the corresponding `send` events.
 
-### Service Map (JSON)
+### Service Map (YAML)
 
 **When `SERVICE_MAP_PATH` is configured**, a service map is maintained that tracks each profiled service's outbound HTTP endpoints and non-HTTP connections (databases, caches, message buses):
 
-```json
-{
-  "generated_at": "2024-04-08T18:30:00.000000000Z",
-  "services": [
-    {
-      "name": "productpage",
-      "image": "docker.io/istio/examples-bookinfo-productpage-v1:1.20.1",
-      "endpoints": [
-        {
-          "destination": "reviews",
-          "destination_type": "container",
-          "method": "GET",
-          "path": "/reviews/0",
-          "request_schema": null,
-          "response_schema": {
-            "clustername": "string",
-            "id": "string",
-            "podname": "string",
-            "reviews": [
-              {
-                "reviewer": "string",
-                "text": "string"
-              }
-            ]
-          },
-          "first_seen": "2024-04-08T18:24:10.000000000Z",
-          "last_seen": "2024-04-08T18:30:00.000000000Z",
-          "count": 150
-        }
-      ],
-      "connections": [
-        {
-          "destination": "postgres",
-          "destination_type": "container",
-          "protocol": "postgres",
-          "category": "database",
-          "port": 5432,
-          "confidence": 90,
-          "reason": "port 5432, valid Postgres startup/SSLRequest header",
-          "first_seen": "2024-04-08T18:24:10.000000000Z",
-          "last_seen": "2024-04-08T18:30:00.000000000Z",
-          "count": 1
-        },
-        {
-          "destination": "redis",
-          "destination_type": "container",
-          "protocol": "redis",
-          "category": "cache",
-          "port": 6379,
-          "confidence": 90,
-          "reason": "redis RESP array",
-          "first_seen": "2024-04-08T18:24:10.000000000Z",
-          "last_seen": "2024-04-08T18:30:00.000000000Z",
-          "count": 1
-        }
-      ],
-      "first_seen": "2024-04-08T18:24:10.000000000Z",
-      "last_seen": "2024-04-08T18:30:00.000000000Z"
-    },
-    {
-      "name": "reviews",
-      "image": "docker.io/istio/examples-bookinfo-reviews-v1:1.20.1",
-      "endpoints": [
-        {
-          "destination": "ratings",
-          "destination_type": "container",
-          "method": "GET",
-          "path": "/ratings/0",
-          "request_schema": null,
-          "response_schema": {
-            "rating": "number"
-          },
-          "first_seen": "2024-04-08T18:25:00.000000000Z",
-          "last_seen": "2024-04-08T18:29:00.000000000Z",
-          "count": 10
-        }
-      ],
-      "first_seen": "2024-04-08T18:25:00.000000000Z",
-      "last_seen": "2024-04-08T18:29:00.000000000Z"
-    }
-  ]
-}
+```yaml
+generated_at: "2024-04-08T18:30:00.000000000Z"
+services:
+  - name: productpage
+    image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.1
+    endpoints:
+      - destination: reviews
+        destination_type: container
+        method: GET
+        path: /reviews/0
+        request_schema: null
+        response_schema:
+          clustername: string
+          id: string
+          podname: string
+          reviews:
+            - reviewer: string
+              text: string
+        first_seen: "2024-04-08T18:24:10.000000000Z"
+        last_seen: "2024-04-08T18:30:00.000000000Z"
+        count: 150
+    connections:
+      - destination: postgres
+        destination_type: container
+        protocol: postgres
+        category: database
+        port: 5432
+        confidence: 90
+        reason: port 5432, valid Postgres startup/SSLRequest header
+        first_seen: "2024-04-08T18:24:10.000000000Z"
+        last_seen: "2024-04-08T18:30:00.000000000Z"
+        count: 1
+      - destination: redis
+        destination_type: container
+        protocol: redis
+        category: cache
+        port: 6379
+        confidence: 90
+        reason: redis RESP array
+        first_seen: "2024-04-08T18:24:10.000000000Z"
+        last_seen: "2024-04-08T18:30:00.000000000Z"
+        count: 1
+    first_seen: "2024-04-08T18:24:10.000000000Z"
+    last_seen: "2024-04-08T18:30:00.000000000Z"
+  - name: reviews
+    image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.1
+    endpoints:
+      - destination: ratings
+        destination_type: container
+        method: GET
+        path: /ratings/0
+        request_schema: null
+        response_schema:
+          rating: number
+        first_seen: "2024-04-08T18:25:00.000000000Z"
+        last_seen: "2024-04-08T18:29:00.000000000Z"
+        count: 10
+    first_seen: "2024-04-08T18:25:00.000000000Z"
+    last_seen: "2024-04-08T18:29:00.000000000Z"
 ```
 
 **Service Map Structure:**

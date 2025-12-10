@@ -6,6 +6,7 @@ require (
 	github.com/cilium/ebpf v0.14.0
 	github.com/containerd/containerd v1.7.29
 	golang.org/x/sys v0.34.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
