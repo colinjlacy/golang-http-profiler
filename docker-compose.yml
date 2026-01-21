@@ -5,6 +5,10 @@ services:
     build:
       context: .
       dockerfile: ./cmd/server/Dockerfile
+    labels:
+      - "app.role=web-server"
+      - "app.tier=backend"
+      - "app.component=api"
     environment:
       - ADI_PROFILE=local
       - ADI_PROFILE_NAME=http-service
@@ -18,6 +22,10 @@ services:
 
   postgres:
     image: postgres:15-alpine
+    labels:
+      - "app.role=database"
+      - "app.tier=data"
+      - "app.component=relational-db"
     environment:
       - POSTGRES_USER=testuser
       - POSTGRES_PASSWORD=testpass
@@ -32,6 +40,10 @@ services:
 
   redis:
     image: redis:7-alpine
+    labels:
+      - "app.role=cache"
+      - "app.tier=data"
+      - "app.component=key-value-store"
     ports:
       - "6379:6379"
     healthcheck:
@@ -42,6 +54,10 @@ services:
 
   nats-server:
     image: nats:2-alpine
+    labels:
+      - "app.role=message-broker"
+      - "app.tier=infrastructure"
+      - "app.component=message-bus"
     ports:
       - "4222:4222"
     healthcheck:
@@ -55,6 +71,10 @@ services:
     build:
       context: .
       dockerfile: ./cmd/request-logger/Dockerfile
+    labels:
+      - "app.role=worker"
+      - "app.tier=backend"
+      - "app.component=event-consumer"
     environment:
       - ADI_PROFILE=local
       - ADI_PROFILE_NAME=request-logger
@@ -71,6 +91,10 @@ services:
     build:
       context: .
       dockerfile: ./cmd/traffic/Dockerfile
+    labels:
+      - "app.role=test-client"
+      - "app.tier=testing"
+      - "app.component=load-generator"
     environment:
       - ADI_PROFILE=local
       - ADI_PROFILE_NAME=traffic-generator
