@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,6 +95,126 @@ type ConnectionEventInfo struct {
 	Port       uint16 // Remote port
 	Confidence int    // 0-100
 	Reason     string // Detection reason
+}
+
+// ========================================================================
+// ObservedBehaviors format structs (new canonical output format)
+// ========================================================================
+
+// ObservedBehaviors is the top-level structure for the new canonical output format
+type ObservedBehaviors struct {
+	APIVersion string                    `yaml:"apiVersion"`
+	Kind       string                    `yaml:"kind"`
+	Metadata   ObservedBehaviorsMetadata `yaml:"metadata"`
+	Spec       ObservedBehaviorsSpec     `yaml:"spec"`
+}
+
+// ObservedBehaviorsMetadata contains metadata about the observation run
+type ObservedBehaviorsMetadata struct {
+	Name string `yaml:"name"`
+}
+
+// ObservedBehaviorsSpec contains the main observation data
+type ObservedBehaviorsSpec struct {
+	GeneratedAt        string                 `yaml:"generatedAt"`
+	ObservationEngines []ObservationEngineRef `yaml:"observationEngines,omitempty"`
+	Environment        EnvironmentInfo        `yaml:"environment"`
+	Workloads          []WorkloadIdentity     `yaml:"workloads"`
+	Behaviors          []ObservedBehavior     `yaml:"behaviors"`
+}
+
+// ObservationEngineRef references the observation engine used
+type ObservationEngineRef struct {
+	Ref string `yaml:"ref"`
+}
+
+// EnvironmentInfo describes the environment where observations were made
+type EnvironmentInfo struct {
+	Observed string `yaml:"observed"` // e.g., "local", "dev", "staging", "prod"
+}
+
+// WorkloadIdentity represents a stable identity for a workload
+type WorkloadIdentity struct {
+	ID          string           `yaml:"id"`
+	DisplayName string           `yaml:"displayName"`
+	Software    WorkloadSoftware `yaml:"software,omitempty"`
+	Evidence    WorkloadEvidence `yaml:"evidence"`
+}
+
+// WorkloadSoftware contains software metadata for a workload
+type WorkloadSoftware struct {
+	Image string `yaml:"image,omitempty"`
+}
+
+// WorkloadEvidence contains evidence about when a workload was observed
+type WorkloadEvidence struct {
+	FirstSeen string                 `yaml:"firstSeen"`
+	LastSeen  string                 `yaml:"lastSeen"`
+	Sources   []ObservationSourceRef `yaml:"sources,omitempty"`
+}
+
+// ObservedBehavior represents a single observed interaction
+type ObservedBehavior struct {
+	ID          string              `yaml:"id"`
+	SourceRef   string              `yaml:"sourceRef"`
+	Destination BehaviorDestination `yaml:"destination"`
+	Facets      BehaviorFacets      `yaml:"facets"`
+	Evidence    BehaviorEvidence    `yaml:"evidence"`
+}
+
+// BehaviorDestination describes where the interaction was directed
+type BehaviorDestination struct {
+	WorkloadRef string `yaml:"workloadRef,omitempty"`
+	// Future: Identity fields for non-container destinations
+	// Identity *DestinationIdentity `yaml:"identity,omitempty"`
+}
+
+// BehaviorFacets contains protocol and interface information
+type BehaviorFacets struct {
+	Protocol  ProtocolFacet   `yaml:"protocol"`
+	Interface *InterfaceFacet `yaml:"interface,omitempty"`
+	Network   *NetworkFacet   `yaml:"network,omitempty"`
+}
+
+// ProtocolFacet describes the protocol used
+type ProtocolFacet struct {
+	Name                     string  `yaml:"name"`
+	Category                 string  `yaml:"category,omitempty"`
+	ClassificationConfidence float64 `yaml:"classificationConfidence,omitempty"`
+	ClassificationReason     string  `yaml:"classificationReason,omitempty"`
+}
+
+// InterfaceFacet describes application-level interface details
+type InterfaceFacet struct {
+	HTTP *HTTPInterface `yaml:"http,omitempty"`
+}
+
+// HTTPInterface describes HTTP-specific details
+type HTTPInterface struct {
+	Method         string      `yaml:"method"`
+	Path           string      `yaml:"path"`
+	RequestSchema  interface{} `yaml:"requestSchema"`
+	ResponseSchema interface{} `yaml:"responseSchema"`
+}
+
+// NetworkFacet describes network-level details
+type NetworkFacet struct {
+	Transport string `yaml:"transport"` // e.g., "tcp", "udp"
+	Port      uint16 `yaml:"port"`
+}
+
+// BehaviorEvidence contains evidence about the observed behavior
+type BehaviorEvidence struct {
+	FirstSeen          string                 `yaml:"firstSeen"`
+	LastSeen           string                 `yaml:"lastSeen"`
+	Count              int64                  `yaml:"count"`
+	ObserverConfidence float64                `yaml:"observerConfidence"`
+	Sources            []ObservationSourceRef `yaml:"sources,omitempty"`
+}
+
+// ObservationSourceRef references the observation engine that captured this evidence
+type ObservationSourceRef struct {
+	EngineRef string `yaml:"engineRef"`
 }
 
 // ServiceMap tracks service profiles with debounced file writing
@@ -399,34 +520,196 @@ func (sm *ServiceMap) scheduleDebouncedWrite() {
 	})
 }
 
-// writeToFileLocked writes the service map to disk (must hold lock)
-func (sm *ServiceMap) writeToFileLocked() error {
-	services := make([]*ServiceProfile, 0, len(sm.services))
+// transformToObservedBehaviors converts internal service map to ObservedBehaviors format
+func (sm *ServiceMap) transformToObservedBehaviors(generatedAt time.Time) *ObservedBehaviors {
+	// Generate a name based on timestamp
+	nameSuffix := strings.ToLower(generatedAt.Format("2006-01-02t150405z"))
+
+	// Build workload catalog and track which workloads exist
+	workloads := []WorkloadIdentity{}
+	workloadExists := make(map[string]bool)
+
 	for _, profile := range sm.services {
-		services = append(services, profile)
+		workloadID := fmt.Sprintf("workload:container/%s", profile.Name)
+		workloadExists[workloadID] = true
+
+		workload := WorkloadIdentity{
+			ID:          workloadID,
+			DisplayName: profile.Name,
+			Evidence: WorkloadEvidence{
+				FirstSeen: profile.FirstSeen.Format(time.RFC3339Nano),
+				LastSeen:  profile.LastSeen.Format(time.RFC3339Nano),
+				Sources: []ObservationSourceRef{
+					{EngineRef: "observationengine/golang-http-profiler"},
+				},
+			},
+		}
+
+		if profile.Image != "" {
+			workload.Software.Image = profile.Image
+		}
+
+		workloads = append(workloads, workload)
 	}
 
-	output := struct {
-		GeneratedAt time.Time         `yaml:"generated_at"`
-		Services    []*ServiceProfile `yaml:"services"`
-	}{
-		GeneratedAt: time.Now(),
-		Services:    services,
+	// Build behaviors list
+	behaviors := []ObservedBehavior{}
+
+	for _, profile := range sm.services {
+		sourceRef := fmt.Sprintf("workload:container/%s", profile.Name)
+
+		// Transform HTTP endpoints to behaviors
+		for _, endpoint := range profile.Endpoints {
+			destRef := fmt.Sprintf("workload:container/%s", endpoint.Destination)
+
+			// Generate a readable behavior ID
+			behaviorID := fmt.Sprintf("behavior:%s:http:%s:%s:%s",
+				profile.Name,
+				endpoint.Destination,
+				endpoint.Method,
+				endpoint.Path)
+
+			behavior := ObservedBehavior{
+				ID:        behaviorID,
+				SourceRef: sourceRef,
+				Destination: BehaviorDestination{
+					WorkloadRef: destRef,
+				},
+				Facets: BehaviorFacets{
+					Protocol: ProtocolFacet{
+						Name: "http",
+					},
+					Interface: &InterfaceFacet{
+						HTTP: &HTTPInterface{
+							Method:         endpoint.Method,
+							Path:           endpoint.Path,
+							RequestSchema:  endpoint.RequestSchema,
+							ResponseSchema: endpoint.ResponseSchema,
+						},
+					},
+				},
+				Evidence: BehaviorEvidence{
+					FirstSeen:          endpoint.FirstSeen.Format(time.RFC3339Nano),
+					LastSeen:           endpoint.LastSeen.Format(time.RFC3339Nano),
+					Count:              endpoint.Count,
+					ObserverConfidence: 1.0,
+					Sources: []ObservationSourceRef{
+						{EngineRef: "observationengine/golang-http-profiler"},
+					},
+				},
+			}
+
+			behaviors = append(behaviors, behavior)
+		}
+
+		// Transform non-HTTP connections to behaviors
+		for _, conn := range profile.Connections {
+			// Fix destination: if destination equals source, use protocol name instead
+			destName := conn.Destination
+			if destName == profile.Name {
+				// Destination wasn't properly resolved - use protocol name as fallback
+				destName = conn.Protocol
+			}
+
+			destRef := fmt.Sprintf("workload:container/%s", destName)
+
+			// Generate a readable behavior ID
+			behaviorID := fmt.Sprintf("behavior:%s:tcp:%s:%d:%s",
+				profile.Name,
+				destName,
+				conn.Port,
+				conn.Protocol)
+
+			behavior := ObservedBehavior{
+				ID:        behaviorID,
+				SourceRef: sourceRef,
+				Destination: BehaviorDestination{
+					WorkloadRef: destRef,
+				},
+				Facets: BehaviorFacets{
+					Network: &NetworkFacet{
+						Transport: "tcp",
+						Port:      conn.Port,
+					},
+					Protocol: ProtocolFacet{
+						Name:                     conn.Protocol,
+						Category:                 conn.Category,
+						ClassificationConfidence: float64(conn.Confidence) / 100.0,
+						ClassificationReason:     conn.Reason,
+					},
+				},
+				Evidence: BehaviorEvidence{
+					FirstSeen:          conn.FirstSeen.Format(time.RFC3339Nano),
+					LastSeen:           conn.LastSeen.Format(time.RFC3339Nano),
+					Count:              conn.Count,
+					ObserverConfidence: 1.0,
+					Sources: []ObservationSourceRef{
+						{EngineRef: "observationengine/golang-http-profiler"},
+					},
+				},
+			}
+
+			behaviors = append(behaviors, behavior)
+
+			// Add destination workload if it doesn't exist yet
+			// (e.g., for infrastructure services like postgres, redis, nats that aren't profiled)
+			if !workloadExists[destRef] {
+				workloadExists[destRef] = true
+				workloads = append(workloads, WorkloadIdentity{
+					ID:          destRef,
+					DisplayName: destName,
+					Evidence: WorkloadEvidence{
+						FirstSeen: conn.FirstSeen.Format(time.RFC3339Nano),
+						LastSeen:  conn.LastSeen.Format(time.RFC3339Nano),
+						Sources: []ObservationSourceRef{
+							{EngineRef: "observationengine/golang-http-profiler"},
+						},
+					},
+				})
+			}
+		}
 	}
 
-	data, err := yaml.Marshal(output)
+	return &ObservedBehaviors{
+		APIVersion: "adi.dev/v1alpha1",
+		Kind:       "ObservedBehaviors",
+		Metadata: ObservedBehaviorsMetadata{
+			Name: fmt.Sprintf("http-profiler-local-%s", nameSuffix),
+		},
+		Spec: ObservedBehaviorsSpec{
+			GeneratedAt: generatedAt.Format(time.RFC3339Nano),
+			ObservationEngines: []ObservationEngineRef{
+				{Ref: "observationengine/golang-http-profiler"},
+			},
+			Environment: EnvironmentInfo{
+				Observed: "local",
+			},
+			Workloads: workloads,
+			Behaviors: behaviors,
+		},
+	}
+}
+
+// writeToFileLocked writes the service map to disk in ObservedBehaviors format (must hold lock)
+func (sm *ServiceMap) writeToFileLocked() error {
+	generatedAt := time.Now()
+
+	// Transform to ObservedBehaviors format
+	observedBehaviors := sm.transformToObservedBehaviors(generatedAt)
+
+	data, err := yaml.Marshal(observedBehaviors)
 	if err != nil {
-		return fmt.Errorf("marshal service map: %w", err)
+		return fmt.Errorf("marshal observed behaviors: %w", err)
 	}
 
 	tmpPath := sm.outputPath + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return fmt.Errorf("write temp service map: %w", err)
+		return fmt.Errorf("write temp observed behaviors: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, sm.outputPath); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("rename service map: %w", err)
+		return fmt.Errorf("rename observed behaviors: %w", err)
 	}
 
 	return nil
