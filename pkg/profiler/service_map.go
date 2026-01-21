@@ -5,6 +5,7 @@ package profiler
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -520,152 +521,251 @@ func (sm *ServiceMap) scheduleDebouncedWrite() {
 	})
 }
 
+// ========================================================================
+// Mapping functions: Convert internal structures to ObservedBehaviors format
+// ========================================================================
+
+// mapServiceToWorkload converts a ServiceProfile to a WorkloadIdentity
+func mapServiceToWorkload(profile *ServiceProfile) WorkloadIdentity {
+	workloadID := fmt.Sprintf("workload:container/%s", profile.Name)
+
+	workload := WorkloadIdentity{
+		ID:          workloadID,
+		DisplayName: profile.Name,
+		Evidence: WorkloadEvidence{
+			FirstSeen: profile.FirstSeen.Format(time.RFC3339Nano),
+			LastSeen:  profile.LastSeen.Format(time.RFC3339Nano),
+			Sources: []ObservationSourceRef{
+				{EngineRef: "observationengine/golang-http-profiler"},
+			},
+		},
+	}
+
+	if profile.Image != "" {
+		workload.Software.Image = profile.Image
+	}
+
+	return workload
+}
+
+// mapEndpointToBehavior converts an EndpointInfo to an ObservedBehavior (HTTP interaction)
+func mapEndpointToBehavior(sourceServiceName string, endpoint *EndpointInfo) ObservedBehavior {
+	sourceRef := fmt.Sprintf("workload:container/%s", sourceServiceName)
+	destRef := fmt.Sprintf("workload:container/%s", endpoint.Destination)
+
+	// Generate stable, readable behavior ID
+	behaviorID := fmt.Sprintf("behavior:%s:http:%s:%s:%s",
+		sourceServiceName,
+		endpoint.Destination,
+		endpoint.Method,
+		endpoint.Path)
+
+	return ObservedBehavior{
+		ID:        behaviorID,
+		SourceRef: sourceRef,
+		Destination: BehaviorDestination{
+			WorkloadRef: destRef,
+		},
+		Facets: BehaviorFacets{
+			Protocol: ProtocolFacet{
+				Name: "http",
+			},
+			Interface: &InterfaceFacet{
+				HTTP: &HTTPInterface{
+					Method:         endpoint.Method,
+					Path:           endpoint.Path,
+					RequestSchema:  endpoint.RequestSchema,
+					ResponseSchema: endpoint.ResponseSchema,
+				},
+			},
+		},
+		Evidence: BehaviorEvidence{
+			FirstSeen:          endpoint.FirstSeen.Format(time.RFC3339Nano),
+			LastSeen:           endpoint.LastSeen.Format(time.RFC3339Nano),
+			Count:              endpoint.Count,
+			ObserverConfidence: 1.0,
+			Sources: []ObservationSourceRef{
+				{EngineRef: "observationengine/golang-http-profiler"},
+			},
+		},
+	}
+}
+
+// mapConnectionToBehavior converts a ConnectionInfo to an ObservedBehavior (non-HTTP protocol interaction)
+func mapConnectionToBehavior(sourceServiceName string, conn *ConnectionInfo) ObservedBehavior {
+	sourceRef := fmt.Sprintf("workload:container/%s", sourceServiceName)
+
+	// Fix destination: if destination equals source, use protocol name instead
+	// This handles cases where destination resolution failed
+	destName := conn.Destination
+	if destName == sourceServiceName {
+		destName = conn.Protocol
+	}
+
+	destRef := fmt.Sprintf("workload:container/%s", destName)
+
+	// Generate stable, readable behavior ID
+	behaviorID := fmt.Sprintf("behavior:%s:tcp:%s:%d:%s",
+		sourceServiceName,
+		destName,
+		conn.Port,
+		conn.Protocol)
+
+	return ObservedBehavior{
+		ID:        behaviorID,
+		SourceRef: sourceRef,
+		Destination: BehaviorDestination{
+			WorkloadRef: destRef,
+		},
+		Facets: BehaviorFacets{
+			Network: &NetworkFacet{
+				Transport: "tcp",
+				Port:      conn.Port,
+			},
+			Protocol: ProtocolFacet{
+				Name:                     conn.Protocol,
+				Category:                 conn.Category,
+				ClassificationConfidence: float64(conn.Confidence) / 100.0,
+				ClassificationReason:     conn.Reason,
+			},
+		},
+		Evidence: BehaviorEvidence{
+			FirstSeen:          conn.FirstSeen.Format(time.RFC3339Nano),
+			LastSeen:           conn.LastSeen.Format(time.RFC3339Nano),
+			Count:              conn.Count,
+			ObserverConfidence: 1.0,
+			Sources: []ObservationSourceRef{
+				{EngineRef: "observationengine/golang-http-profiler"},
+			},
+		},
+	}
+}
+
+// createInferredWorkload creates a WorkloadIdentity for a destination that wasn't directly profiled
+// (e.g., infrastructure services like postgres, redis, nats)
+func createInferredWorkload(destName string, firstSeen, lastSeen time.Time) WorkloadIdentity {
+	workloadID := fmt.Sprintf("workload:container/%s", destName)
+
+	return WorkloadIdentity{
+		ID:          workloadID,
+		DisplayName: destName,
+		Evidence: WorkloadEvidence{
+			FirstSeen: firstSeen.Format(time.RFC3339Nano),
+			LastSeen:  lastSeen.Format(time.RFC3339Nano),
+			Sources: []ObservationSourceRef{
+				{EngineRef: "observationengine/golang-http-profiler"},
+			},
+		},
+	}
+}
+
+// ========================================================================
+// Validation: Ensure transformation completeness
+// ========================================================================
+
+// TransformationStats tracks counts before and after transformation
+type TransformationStats struct {
+	SourceServices    int
+	SourceEndpoints   int
+	SourceConnections int
+	OutputWorkloads   int
+	OutputBehaviors   int
+	InferredWorkloads int
+}
+
+// validateTransformation checks that the transformation is complete and logs any discrepancies
+func validateTransformation(services map[string]*ServiceProfile, result *ObservedBehaviors) TransformationStats {
+	stats := TransformationStats{}
+
+	// Count source data
+	stats.SourceServices = len(services)
+	for _, profile := range services {
+		stats.SourceEndpoints += len(profile.Endpoints)
+		stats.SourceConnections += len(profile.Connections)
+	}
+
+	// Count output data
+	stats.OutputWorkloads = len(result.Spec.Workloads)
+	stats.OutputBehaviors = len(result.Spec.Behaviors)
+
+	// Count inferred workloads (workloads not from profiled services)
+	inferredCount := 0
+	profiledWorkloadIDs := make(map[string]bool)
+	for _, profile := range services {
+		workloadID := fmt.Sprintf("workload:container/%s", profile.Name)
+		profiledWorkloadIDs[workloadID] = true
+	}
+	for _, workload := range result.Spec.Workloads {
+		if !profiledWorkloadIDs[workload.ID] {
+			inferredCount++
+		}
+	}
+	stats.InferredWorkloads = inferredCount
+
+	// Validation checks
+	expectedBehaviors := stats.SourceEndpoints + stats.SourceConnections
+	if stats.OutputBehaviors != expectedBehaviors {
+		log.Printf("validation warning: expected %d behaviors (endpoints+connections), got %d",
+			expectedBehaviors, stats.OutputBehaviors)
+	}
+
+	expectedProfiledWorkloads := stats.SourceServices
+	actualProfiledWorkloads := stats.OutputWorkloads - stats.InferredWorkloads
+	if actualProfiledWorkloads != expectedProfiledWorkloads {
+		log.Printf("validation warning: expected %d profiled workloads, got %d",
+			expectedProfiledWorkloads, actualProfiledWorkloads)
+	}
+
+	// Log summary
+	log.Printf("transformation complete: %d services → %d workloads (%d profiled, %d inferred), %d interactions → %d behaviors",
+		stats.SourceServices,
+		stats.OutputWorkloads,
+		actualProfiledWorkloads,
+		stats.InferredWorkloads,
+		stats.SourceEndpoints+stats.SourceConnections,
+		stats.OutputBehaviors)
+
+	return stats
+}
+
 // transformToObservedBehaviors converts internal service map to ObservedBehaviors format
 func (sm *ServiceMap) transformToObservedBehaviors(generatedAt time.Time) *ObservedBehaviors {
 	// Generate a name based on timestamp
 	nameSuffix := strings.ToLower(generatedAt.Format("2006-01-02t150405z"))
 
-	// Build workload catalog and track which workloads exist
+	// Phase 1: Map all profiled services to workloads
 	workloads := []WorkloadIdentity{}
 	workloadExists := make(map[string]bool)
 
 	for _, profile := range sm.services {
-		workloadID := fmt.Sprintf("workload:container/%s", profile.Name)
-		workloadExists[workloadID] = true
-
-		workload := WorkloadIdentity{
-			ID:          workloadID,
-			DisplayName: profile.Name,
-			Evidence: WorkloadEvidence{
-				FirstSeen: profile.FirstSeen.Format(time.RFC3339Nano),
-				LastSeen:  profile.LastSeen.Format(time.RFC3339Nano),
-				Sources: []ObservationSourceRef{
-					{EngineRef: "observationengine/golang-http-profiler"},
-				},
-			},
-		}
-
-		if profile.Image != "" {
-			workload.Software.Image = profile.Image
-		}
-
+		workload := mapServiceToWorkload(profile)
+		workloadExists[workload.ID] = true
 		workloads = append(workloads, workload)
 	}
 
-	// Build behaviors list
+	// Phase 2: Map all interactions to behaviors
 	behaviors := []ObservedBehavior{}
 
 	for _, profile := range sm.services {
-		sourceRef := fmt.Sprintf("workload:container/%s", profile.Name)
-
-		// Transform HTTP endpoints to behaviors
+		// Map HTTP endpoints
 		for _, endpoint := range profile.Endpoints {
-			destRef := fmt.Sprintf("workload:container/%s", endpoint.Destination)
-
-			// Generate a readable behavior ID
-			behaviorID := fmt.Sprintf("behavior:%s:http:%s:%s:%s",
-				profile.Name,
-				endpoint.Destination,
-				endpoint.Method,
-				endpoint.Path)
-
-			behavior := ObservedBehavior{
-				ID:        behaviorID,
-				SourceRef: sourceRef,
-				Destination: BehaviorDestination{
-					WorkloadRef: destRef,
-				},
-				Facets: BehaviorFacets{
-					Protocol: ProtocolFacet{
-						Name: "http",
-					},
-					Interface: &InterfaceFacet{
-						HTTP: &HTTPInterface{
-							Method:         endpoint.Method,
-							Path:           endpoint.Path,
-							RequestSchema:  endpoint.RequestSchema,
-							ResponseSchema: endpoint.ResponseSchema,
-						},
-					},
-				},
-				Evidence: BehaviorEvidence{
-					FirstSeen:          endpoint.FirstSeen.Format(time.RFC3339Nano),
-					LastSeen:           endpoint.LastSeen.Format(time.RFC3339Nano),
-					Count:              endpoint.Count,
-					ObserverConfidence: 1.0,
-					Sources: []ObservationSourceRef{
-						{EngineRef: "observationengine/golang-http-profiler"},
-					},
-				},
-			}
-
+			behavior := mapEndpointToBehavior(profile.Name, endpoint)
 			behaviors = append(behaviors, behavior)
 		}
 
-		// Transform non-HTTP connections to behaviors
+		// Map non-HTTP connections
 		for _, conn := range profile.Connections {
-			// Fix destination: if destination equals source, use protocol name instead
-			destName := conn.Destination
-			if destName == profile.Name {
-				// Destination wasn't properly resolved - use protocol name as fallback
-				destName = conn.Protocol
-			}
-
-			destRef := fmt.Sprintf("workload:container/%s", destName)
-
-			// Generate a readable behavior ID
-			behaviorID := fmt.Sprintf("behavior:%s:tcp:%s:%d:%s",
-				profile.Name,
-				destName,
-				conn.Port,
-				conn.Protocol)
-
-			behavior := ObservedBehavior{
-				ID:        behaviorID,
-				SourceRef: sourceRef,
-				Destination: BehaviorDestination{
-					WorkloadRef: destRef,
-				},
-				Facets: BehaviorFacets{
-					Network: &NetworkFacet{
-						Transport: "tcp",
-						Port:      conn.Port,
-					},
-					Protocol: ProtocolFacet{
-						Name:                     conn.Protocol,
-						Category:                 conn.Category,
-						ClassificationConfidence: float64(conn.Confidence) / 100.0,
-						ClassificationReason:     conn.Reason,
-					},
-				},
-				Evidence: BehaviorEvidence{
-					FirstSeen:          conn.FirstSeen.Format(time.RFC3339Nano),
-					LastSeen:           conn.LastSeen.Format(time.RFC3339Nano),
-					Count:              conn.Count,
-					ObserverConfidence: 1.0,
-					Sources: []ObservationSourceRef{
-						{EngineRef: "observationengine/golang-http-profiler"},
-					},
-				},
-			}
-
+			behavior := mapConnectionToBehavior(profile.Name, conn)
 			behaviors = append(behaviors, behavior)
 
-			// Add destination workload if it doesn't exist yet
-			// (e.g., for infrastructure services like postgres, redis, nats that aren't profiled)
-			if !workloadExists[destRef] {
-				workloadExists[destRef] = true
-				workloads = append(workloads, WorkloadIdentity{
-					ID:          destRef,
-					DisplayName: destName,
-					Evidence: WorkloadEvidence{
-						FirstSeen: conn.FirstSeen.Format(time.RFC3339Nano),
-						LastSeen:  conn.LastSeen.Format(time.RFC3339Nano),
-						Sources: []ObservationSourceRef{
-							{EngineRef: "observationengine/golang-http-profiler"},
-						},
-					},
-				})
+			// Phase 3: Infer workloads for unprofiled destinations
+			if !workloadExists[behavior.Destination.WorkloadRef] {
+				// Extract destination name from the workloadRef (strip "workload:container/" prefix)
+				destName := strings.TrimPrefix(behavior.Destination.WorkloadRef, "workload:container/")
+				inferredWorkload := createInferredWorkload(destName, conn.FirstSeen, conn.LastSeen)
+
+				workloadExists[inferredWorkload.ID] = true
+				workloads = append(workloads, inferredWorkload)
 			}
 		}
 	}
@@ -696,6 +796,9 @@ func (sm *ServiceMap) writeToFileLocked() error {
 
 	// Transform to ObservedBehaviors format
 	observedBehaviors := sm.transformToObservedBehaviors(generatedAt)
+
+	// Validate transformation completeness
+	validateTransformation(sm.services, observedBehaviors)
 
 	data, err := yaml.Marshal(observedBehaviors)
 	if err != nil {
