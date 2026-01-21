@@ -69,8 +69,8 @@ export CGO_ENABLED=1
 ```sh
 # Linux only; requires clang/llvm and kernel headers
 go mod download
-go generate ./pkg/profiler            # builds the BPF object via bpf2go (emits files under pkg/profiler with tag ebpf_build)
-go build -tags ebpf_build ./cmd/profiler  # profiler binary (uses generated bindings)
+go generate ./pkg/profiler       # builds the BPF object via bpf2go (emits profiler_bpfel.go and profiler_bpfeb.go)
+go build ./cmd/profiler          # profiler binary (uses generated bindings)
 ```
 
 ## Environment Variables
@@ -170,13 +170,21 @@ sudo OUTPUT_PATH="/some/path/ebpf_http_profiler.log" \
 The included `docker-compose.yml` sets up a demo microservices architecture with the following profiled services (all have `ADI_PROFILE=local`):
 
 - **http-service**: HTTP server that publishes request info to NATS
+  - Labels: `app.role=web-server`, `app.tier=backend`, `app.component=api`
 - **request-logger**: Subscribes to NATS and stores requests in Redis
+  - Labels: `app.role=logger`, `app.tier=backend`, `app.component=event-consumer`
 - **traffic-generator**: Generates HTTP requests and database/cache operations
+  - Labels: `app.role=test-client`, `app.tier=testing`, `app.component=load-generator`
 
-And supporting infrastructure (not profiled):
+And supporting infrastructure (also profiled with `ADI_PROFILE=local`):
 - **postgres**: PostgreSQL database
+  - Labels: `app.role=database`, `app.tier=data`, `app.component=relational-db`
 - **redis**: Redis cache
+  - Labels: `app.role=cache`, `app.tier=data`, `app.component=key-value-store`
 - **nats-server**: NATS message broker
+  - Labels: `app.role=message-broker`, `app.tier=infrastructure`, `app.component=message-bus`
+
+All services are tagged with Docker Compose labels that describe their role, tier, and component type. These labels are automatically captured by the profiler and included in the service map output when container metadata enrichment is enabled.
 
 Run them all with:
 ```sh
@@ -325,7 +333,7 @@ Classification uses a combination of port-based heuristics and protocol fingerpr
 
 ### Container metadata fields
 
-**When `CONTAINERD_SOCKET` is configured**, HTTP events are enriched with container metadata:
+**When `CONTAINERD_SOCKET` is configured**, HTTP events and connection events are enriched with container metadata:
 
 - `source_container`: Metadata about the container that **sent** the request (the requester)
   - `service`: Docker Compose service name (from `com.docker.compose.service` label)
@@ -337,113 +345,172 @@ Classification uses a combination of port-based heuristics and protocol fingerpr
   - Will be `null` for external destinations
 - `destination_type`: Either `"container"` (for container-to-container calls) or `"external"` (for calls outside the container runtime)
 
+**Container labels** are also captured from the container runtime and included in the service map output. This includes:
+- Custom application labels (e.g., `app.role`, `app.tier`, `app.component`)
+- Docker Compose metadata (e.g., `com.docker.compose.service`, `com.docker.compose.project`)
+- Container runtime labels (e.g., `nerdctl/*`, `io.containerd.*`)
+
+Labels can be used to classify and organize services in downstream tooling.
+
 **How it works:**
 - For `"send"` events: Source resolved from PID (sender), destination from IP (receiver)
 - For `"recv"` events: Source resolved from IP (sender), destination from PID (receiver)
 - This ensures `source_container` always means "who sent it" and `destination_container` always means "who received it"
+- All container labels are extracted during container resolution and stored with each workload
 
 **Note:** Some `recv` events may have `source_ip: "invalid IP"` when socket peer information isn't available. These events will only have `destination_container` populated. Full service-to-service mapping is captured in the corresponding `send` events.
 
 ### Service Map (YAML)
 
-**When `SERVICE_MAP_PATH` is configured**, a service map is maintained that tracks each profiled service's outbound HTTP endpoints and non-HTTP connections (databases, caches, message buses):
+**When `SERVICE_MAP_PATH` is configured**, a service map is maintained in the [ObservedBehaviors format](https://github.com/cncf/toc/issues/1797), which tracks workload identities and their observed network behaviors (HTTP endpoints and non-HTTP connections):
 
 ```yaml
-generated_at: "2024-04-08T18:30:00.000000000Z"
-services:
-  - name: productpage
-    image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.1
-    endpoints:
-      - destination: reviews
-        destination_type: container
-        method: GET
-        path: /reviews/0
-        request_schema: null
-        response_schema:
-          clustername: string
-          id: string
-          podname: string
-          reviews:
-            - reviewer: string
-              text: string
-        first_seen: "2024-04-08T18:24:10.000000000Z"
-        last_seen: "2024-04-08T18:30:00.000000000Z"
+apiVersion: adi.dev/v1alpha1
+kind: ObservedBehaviors
+metadata:
+  name: http-profiler-local-2024-04-08t183000z
+spec:
+  generatedAt: "2024-04-08T18:30:00.000000000Z"
+  observationEngines:
+    - ref: observationengine/golang-http-profiler
+  environment:
+    observed: local
+  workloads:
+    - id: workload:container/productpage
+      displayName: productpage
+      software:
+        image: docker.io/istio/examples-bookinfo-productpage-v1:1.20.1
+      labels:
+        app.role: web-server
+        app.tier: frontend
+        app.component: ui
+        com.docker.compose.project: bookinfo
+        com.docker.compose.service: productpage
+      evidence:
+        firstSeen: "2024-04-08T18:24:10.000000000Z"
+        lastSeen: "2024-04-08T18:30:00.000000000Z"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/reviews
+      displayName: reviews
+      software:
+        image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.1
+      labels:
+        app.role: service
+        app.tier: backend
+        app.component: api
+        com.docker.compose.project: bookinfo
+        com.docker.compose.service: reviews
+      evidence:
+        firstSeen: "2024-04-08T18:25:00.000000000Z"
+        lastSeen: "2024-04-08T18:29:00.000000000Z"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+  behaviors:
+    - id: behavior:productpage:http:reviews:GET:/reviews/0
+      sourceRef: workload:container/productpage
+      destination:
+        workloadRef: workload:container/reviews
+      facets:
+        protocol:
+          name: http
+        interface:
+          http:
+            method: GET
+            path: /reviews/0
+            requestSchema: null
+            responseSchema:
+              clustername: string
+              id: string
+              podname: string
+              reviews:
+                - reviewer: string
+                  text: string
+      evidence:
+        firstSeen: "2024-04-08T18:24:10.000000000Z"
+        lastSeen: "2024-04-08T18:30:00.000000000Z"
         count: 150
-    connections:
-      - destination: postgres
-        destination_type: container
-        protocol: postgres
-        category: database
-        port: 5432
-        confidence: 90
-        reason: port 5432, valid Postgres startup/SSLRequest header
-        first_seen: "2024-04-08T18:24:10.000000000Z"
-        last_seen: "2024-04-08T18:30:00.000000000Z"
+        observerConfidence: 1.0
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:productpage:tcp:postgres:5432:postgres
+      sourceRef: workload:container/productpage
+      destination:
+        workloadRef: workload:container/postgres
+      facets:
+        network:
+          transport: tcp
+          port: 5432
+        protocol:
+          name: postgres
+          category: database
+          classificationConfidence: 0.9
+          classificationReason: "port 5432, valid Postgres startup/SSLRequest header"
+      evidence:
+        firstSeen: "2024-04-08T18:24:10.000000000Z"
+        lastSeen: "2024-04-08T18:30:00.000000000Z"
         count: 1
-      - destination: redis
-        destination_type: container
-        protocol: redis
-        category: cache
-        port: 6379
-        confidence: 90
-        reason: redis RESP array
-        first_seen: "2024-04-08T18:24:10.000000000Z"
-        last_seen: "2024-04-08T18:30:00.000000000Z"
+        observerConfidence: 1.0
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:productpage:tcp:redis:6379:redis
+      sourceRef: workload:container/productpage
+      destination:
+        workloadRef: workload:container/redis
+      facets:
+        network:
+          transport: tcp
+          port: 6379
+        protocol:
+          name: redis
+          category: cache
+          classificationConfidence: 0.9
+          classificationReason: "redis RESP array"
+      evidence:
+        firstSeen: "2024-04-08T18:24:10.000000000Z"
+        lastSeen: "2024-04-08T18:30:00.000000000Z"
         count: 1
-    first_seen: "2024-04-08T18:24:10.000000000Z"
-    last_seen: "2024-04-08T18:30:00.000000000Z"
-  - name: reviews
-    image: docker.io/istio/examples-bookinfo-reviews-v1:1.20.1
-    endpoints:
-      - destination: ratings
-        destination_type: container
-        method: GET
-        path: /ratings/0
-        request_schema: null
-        response_schema:
-          rating: number
-        first_seen: "2024-04-08T18:25:00.000000000Z"
-        last_seen: "2024-04-08T18:29:00.000000000Z"
-        count: 10
-    first_seen: "2024-04-08T18:25:00.000000000Z"
-    last_seen: "2024-04-08T18:29:00.000000000Z"
+        observerConfidence: 1.0
+        sources:
+          - engineRef: observationengine/golang-http-profiler
 ```
 
 **Service Map Structure:**
 
-The map is organized by source service, with each service containing:
-- `name`: Service name (from Docker Compose label or `ADI_PROFILE_NAME`)
-- `image`: Container image with tag (when container metadata is available)
-- `endpoints`: HTTP endpoints called by this service
-- `connections`: Non-HTTP connections (databases, caches, message buses) made by this service
-- `first_seen` / `last_seen`: Timestamps of activity
+The map follows the ObservedBehaviors schema with two main sections:
 
-**Endpoint fields:**
-- `destination`: Target service name
-- `destination_type`: `"container"` or `"external"`
-- `method` / `path`: HTTP method and URL path
-- `request_schema` / `response_schema`: JSON structure (keys and types) without values
-- `count`: Number of times this endpoint was called
+**Workloads** - A catalog of observed services/containers:
+- `id`: Stable workload identifier (e.g., `workload:container/productpage`)
+- `displayName`: Human-readable service name
+- `software.image`: Container image with tag (when available)
+- `labels`: All container labels, including:
+  - Custom application labels (e.g., `app.role`, `app.tier`, `app.component`)
+  - Docker Compose metadata (e.g., `com.docker.compose.service`, `com.docker.compose.project`)
+  - Container runtime labels (e.g., `nerdctl/*`, `io.containerd.*`)
+- `evidence`: Observation metadata (timestamps, sources)
 
-**Connection fields:**
-- `destination`: Target service/host name
-- `destination_type`: `"container"` or `"external"`
-- `protocol`: Detected protocol (e.g., `postgres`, `redis`, `kafka`)
-- `category`: `"database"`, `"cache"`, or `"message_bus"`
-- `port`: Remote port number
-- `confidence`: Detection confidence (0-100)
-- `reason`: Explanation of protocol detection
-- `count`: Number of connection events observed
+**Behaviors** - Individual interactions between workloads:
+- `id`: Stable behavior identifier encoding the interaction
+- `sourceRef`: Reference to the source workload (who initiated the connection)
+- `destination.workloadRef`: Reference to the destination workload (who received the connection)
+- `facets`: Protocol and interface details
+  - For HTTP: `protocol.name: http`, plus `interface.http` with method, path, request/response schemas
+  - For non-HTTP: `protocol.name` (e.g., postgres, redis), `protocol.category` (database, cache, message_bus), `network.transport` and `network.port`
+- `evidence`: Observation metadata including timestamps, count, confidence, and detection reasoning
 
 **How it works:**
-- Each unique `destination + method + path` combination is tracked as a separate endpoint
-- Request/response correlation uses source port matching to pair requests with their responses
+- Container labels are captured automatically from the container runtime when `CONTAINERD_SOCKET` is configured
+- All labels (application, Docker Compose, and runtime metadata) are included in workload definitions
+- Each unique interaction (source + destination + protocol + endpoint) is tracked as a separate behavior
+- Request/response correlation uses source port matching to pair HTTP requests with their responses
 - JSON schemas are extracted showing structure (keys and types) without values
 - Schema variants are preserved: if an endpoint returns different response shapes, each is tracked separately
 - Non-JSON bodies are marked as `"non-json"`, empty bodies as `null`
 - Non-HTTP connections are classified on first payload using port and protocol fingerprinting
+- Inferred workloads (like databases and message brokers not directly profiled) are added to the catalog automatically
 - File is written with a 2-second debounce to coalesce rapid updates
 - On SIGINT/SIGTERM, the map is flushed to disk before exit
+- Output follows the ObservedBehaviors schema for compatibility with ADI tooling
 
 ### Environment Variables (YAML)
 Multi-document YAML with one document per PID:

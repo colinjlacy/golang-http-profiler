@@ -68,7 +68,7 @@ type PendingRequest struct {
 
 // HTTPEventInfo contains the relevant fields from an HTTP event for service mapping
 type HTTPEventInfo struct {
-	Direction  string            // "send" or "recv"
+	Direction  string // "send" or "recv"
 	SourceIP   string
 	SourcePort uint16
 	DestIP     string
@@ -88,7 +88,7 @@ type HTTPEventInfo struct {
 
 // ConnectionEventInfo contains fields for non-HTTP connection events
 type ConnectionEventInfo struct {
-	Direction  string            // "send" or "recv"
+	Direction  string // "send" or "recv"
 	SrcService string
 	SrcImage   string
 	SrcLabels  map[string]string // source container labels
@@ -140,11 +140,11 @@ type EnvironmentInfo struct {
 
 // WorkloadIdentity represents a stable identity for a workload
 type WorkloadIdentity struct {
-	ID          string                 `yaml:"id"`
-	DisplayName string                 `yaml:"displayName"`
-	Software    WorkloadSoftware       `yaml:"software,omitempty"`
-	Labels      map[string]string      `yaml:"labels,omitempty"`
-	Evidence    WorkloadEvidence       `yaml:"evidence"`
+	ID          string            `yaml:"id"`
+	DisplayName string            `yaml:"displayName"`
+	Software    WorkloadSoftware  `yaml:"software,omitempty"`
+	Labels      map[string]string `yaml:"labels,omitempty"`
+	Evidence    WorkloadEvidence  `yaml:"evidence"`
 }
 
 // WorkloadSoftware contains software metadata for a workload
