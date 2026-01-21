@@ -45,6 +45,7 @@ type ConnectionInfo struct {
 type ServiceProfile struct {
 	Name        string            `yaml:"name"`
 	Image       string            `yaml:"image,omitempty"`
+	Labels      map[string]string `yaml:"labels,omitempty"`      // container labels
 	Endpoints   []*EndpointInfo   `yaml:"endpoints,omitempty"`   // HTTP endpoints called
 	Connections []*ConnectionInfo `yaml:"connections,omitempty"` // Non-HTTP connections (databases, caches, etc.)
 	FirstSeen   time.Time         `yaml:"first_seen"`
@@ -55,6 +56,7 @@ type ServiceProfile struct {
 type PendingRequest struct {
 	SrcService  string
 	SrcImage    string
+	SrcLabels   map[string]string
 	DstService  string
 	DstImage    string
 	DstType     string
@@ -66,7 +68,7 @@ type PendingRequest struct {
 
 // HTTPEventInfo contains the relevant fields from an HTTP event for service mapping
 type HTTPEventInfo struct {
-	Direction  string // "send" or "recv"
+	Direction  string            // "send" or "recv"
 	SourceIP   string
 	SourcePort uint16
 	DestIP     string
@@ -78,6 +80,7 @@ type HTTPEventInfo struct {
 	Body       string
 	SrcService string
 	SrcImage   string
+	SrcLabels  map[string]string // source container labels
 	DstService string
 	DstImage   string
 	DstType    string
@@ -85,9 +88,10 @@ type HTTPEventInfo struct {
 
 // ConnectionEventInfo contains fields for non-HTTP connection events
 type ConnectionEventInfo struct {
-	Direction  string // "send" or "recv"
+	Direction  string            // "send" or "recv"
 	SrcService string
 	SrcImage   string
+	SrcLabels  map[string]string // source container labels
 	DstService string
 	DstImage   string
 	DstType    string // "container" or "external"
@@ -136,10 +140,11 @@ type EnvironmentInfo struct {
 
 // WorkloadIdentity represents a stable identity for a workload
 type WorkloadIdentity struct {
-	ID          string           `yaml:"id"`
-	DisplayName string           `yaml:"displayName"`
-	Software    WorkloadSoftware `yaml:"software,omitempty"`
-	Evidence    WorkloadEvidence `yaml:"evidence"`
+	ID          string                 `yaml:"id"`
+	DisplayName string                 `yaml:"displayName"`
+	Software    WorkloadSoftware       `yaml:"software,omitempty"`
+	Labels      map[string]string      `yaml:"labels,omitempty"`
+	Evidence    WorkloadEvidence       `yaml:"evidence"`
 }
 
 // WorkloadSoftware contains software metadata for a workload
@@ -350,7 +355,7 @@ func (sm *ServiceMap) RecordConnectionEvent(event ConnectionEventInfo) {
 	now := time.Now()
 
 	// Get or create service profile
-	profile := sm.getOrCreateProfile(srcService, event.SrcImage, now)
+	profile := sm.getOrCreateProfile(srcService, event.SrcImage, event.SrcLabels, now)
 	profile.LastSeen = now
 
 	// Find or create connection info
@@ -392,18 +397,24 @@ func (sm *ServiceMap) RecordConnectionEvent(event ConnectionEventInfo) {
 }
 
 // getOrCreateProfile gets or creates a service profile
-func (sm *ServiceMap) getOrCreateProfile(name, image string, now time.Time) *ServiceProfile {
+func (sm *ServiceMap) getOrCreateProfile(name, image string, labels map[string]string, now time.Time) *ServiceProfile {
 	profile, exists := sm.services[name]
 	if !exists {
 		profile = &ServiceProfile{
 			Name:        name,
 			Image:       image,
+			Labels:      labels,
 			Endpoints:   []*EndpointInfo{},
 			Connections: []*ConnectionInfo{},
 			FirstSeen:   now,
 			LastSeen:    now,
 		}
 		sm.services[name] = profile
+	} else {
+		// Update labels if provided and profile already exists
+		if labels != nil && len(labels) > 0 {
+			profile.Labels = labels
+		}
 	}
 	return profile
 }
@@ -415,6 +426,7 @@ func (sm *ServiceMap) handleRequest(event HTTPEventInfo, srcService, dstService 
 	sm.pendingRequests[connKey] = &PendingRequest{
 		SrcService:  srcService,
 		SrcImage:    event.SrcImage,
+		SrcLabels:   event.SrcLabels,
 		DstService:  dstService,
 		DstImage:    event.DstImage,
 		DstType:     event.DstType,
@@ -442,7 +454,7 @@ func (sm *ServiceMap) handleResponse(event HTTPEventInfo, srcService, dstService
 	responseSchema := extractJSONSchema(event.Body)
 
 	sm.recordEndpoint(
-		pendingReq.SrcService, pendingReq.SrcImage,
+		pendingReq.SrcService, pendingReq.SrcImage, pendingReq.SrcLabels,
 		pendingReq.DstService, pendingReq.DstType,
 		pendingReq.Method, pendingReq.Path,
 		requestSchema, responseSchema,
@@ -451,14 +463,15 @@ func (sm *ServiceMap) handleResponse(event HTTPEventInfo, srcService, dstService
 
 // recordEndpoint records an HTTP endpoint call
 func (sm *ServiceMap) recordEndpoint(
-	srcService, srcImage, dstService, dstType,
+	srcService, srcImage string, srcLabels map[string]string,
+	dstService, dstType,
 	method, path string,
 	requestSchema, responseSchema interface{},
 ) {
 	now := time.Now()
 
 	// Get or create service profile
-	profile := sm.getOrCreateProfile(srcService, srcImage, now)
+	profile := sm.getOrCreateProfile(srcService, srcImage, srcLabels, now)
 	profile.LastSeen = now
 
 	// Find or create endpoint with matching schemas
@@ -532,6 +545,7 @@ func mapServiceToWorkload(profile *ServiceProfile) WorkloadIdentity {
 	workload := WorkloadIdentity{
 		ID:          workloadID,
 		DisplayName: profile.Name,
+		Labels:      profile.Labels,
 		Evidence: WorkloadEvidence{
 			FirstSeen: profile.FirstSeen.Format(time.RFC3339Nano),
 			LastSeen:  profile.LastSeen.Format(time.RFC3339Nano),

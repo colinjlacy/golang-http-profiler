@@ -724,16 +724,28 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 	if r.serviceMap != nil {
 		srcService := ""
 		srcImage := ""
+		var srcLabels map[string]string
 		dstService := ""
 		dstImage := ""
 		dstType := event.DestinationType
 
+		// Get source container metadata
+		var srcContainerMeta *ContainerMetadata
 		if event.SourceContainer != nil {
+			// Resolve from existing SourceContainer info to get full metadata including labels
+			if r.containerResolver != nil {
+				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+			}
+			
 			srcService = event.SourceContainer.Service
 			if srcService == "" {
 				srcService = event.SourceContainer.ContainerName
 			}
 			srcImage = event.SourceContainer.Image
+			
+			if srcContainerMeta != nil {
+				srcLabels = srcContainerMeta.Labels
+			}
 		} else {
 			// Use PID name if available from opt-in
 			if name, ok := r.pidNames[ev.Pid]; ok && name != "" {
@@ -767,6 +779,7 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			Body:       parsed.Body,
 			SrcService: srcService,
 			SrcImage:   srcImage,
+			SrcLabels:  srcLabels,
 			DstService: dstService,
 			DstImage:   dstImage,
 			DstType:    dstType,
@@ -906,16 +919,28 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 	if r.serviceMap != nil {
 		srcService := ""
 		srcImage := ""
+		var srcLabels map[string]string
 		dstService := ""
 		dstImage := ""
 		dstType := event.DestinationType
 
+		// Get source container metadata with labels
+		var srcContainerMeta *ContainerMetadata
 		if event.SourceContainer != nil {
+			// Resolve to get full metadata including labels
+			if r.containerResolver != nil {
+				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+			}
+			
 			srcService = event.SourceContainer.Service
 			if srcService == "" {
 				srcService = event.SourceContainer.ContainerName
 			}
 			srcImage = event.SourceContainer.Image
+			
+			if srcContainerMeta != nil {
+				srcLabels = srcContainerMeta.Labels
+			}
 		} else {
 			// Use PID name if available from opt-in
 			if name, ok := r.pidNames[ev.Pid]; ok && name != "" {
@@ -940,6 +965,7 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 			Direction:  dir,
 			SrcService: srcService,
 			SrcImage:   srcImage,
+			SrcLabels:  srcLabels,
 			DstService: dstService,
 			DstImage:   dstImage,
 			DstType:    dstType,

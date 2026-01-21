@@ -21,8 +21,9 @@ type ContainerMetadata struct {
 	ContainerName string
 	Image         string
 	ImageTag      string
-	Service       string // from com.docker.compose.service label
-	Project       string // from com.docker.compose.project label
+	Service       string            // from com.docker.compose.service label
+	Project       string            // from com.docker.compose.project label
+	Labels        map[string]string // all container labels
 	IPAddresses   []netip.Addr
 	PortMappings  []PortMapping
 }
@@ -155,6 +156,7 @@ func (r *ContainerResolver) indexContainer(container containerd.Container) error
 		ImageTag:      imageTag,
 		Service:       service,
 		Project:       project,
+		Labels:        labels, // store all labels
 		IPAddresses:   []netip.Addr{},
 		PortMappings:  []PortMapping{},
 	}

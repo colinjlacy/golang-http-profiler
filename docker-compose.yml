@@ -27,6 +27,8 @@ services:
       - "app.tier=data"
       - "app.component=relational-db"
     environment:
+      - ADI_PROFILE=local
+      - ADI_PROFILE_NAME=postgres
       - POSTGRES_USER=testuser
       - POSTGRES_PASSWORD=testpass
       - POSTGRES_DB=testdb
@@ -44,6 +46,9 @@ services:
       - "app.role=cache"
       - "app.tier=data"
       - "app.component=key-value-store"
+    environment:
+      - ADI_PROFILE=local
+      - ADI_PROFILE_NAME=redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -58,6 +63,9 @@ services:
       - "app.role=message-broker"
       - "app.tier=infrastructure"
       - "app.component=message-bus"
+    environment:
+      - ADI_PROFILE=local
+      - ADI_PROFILE_NAME=nats-server
     ports:
       - "4222:4222"
     healthcheck:
@@ -72,7 +80,7 @@ services:
       context: .
       dockerfile: ./cmd/request-logger/Dockerfile
     labels:
-      - "app.role=worker"
+      - "app.role=logger"
       - "app.tier=backend"
       - "app.component=event-consumer"
     environment:
