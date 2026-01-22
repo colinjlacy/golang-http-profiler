@@ -144,6 +144,26 @@ struct {
     __uint(max_entries, 16384);
 } conn_map SEC(".maps");
 
+// Request tracking for HTTP request/response correlation
+struct request_key {
+    __u32 src_ip;
+    __u16 src_port;
+    __u32 dst_ip;
+    __u16 dst_port;
+};
+
+struct request_value {
+    __u64 timestamp;
+    __u32 pid;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct request_key);
+    __type(value, struct request_value);
+    __uint(max_entries, 65536);
+} active_requests SEC(".maps");
+
 // Map to store fd for connect syscalls, keyed by pid_tgid
 struct connect_args {
     int fd;
@@ -297,6 +317,63 @@ fill_event_conn(struct http_event *e, struct conn_info *info)
     e->dport = info->dport;
     copy_bytes(e->saddr, info->saddr, 16);
     copy_bytes(e->daddr, info->daddr, 16);
+}
+
+// Check if this is an HTTP response and update tracking maps
+// Returns true if this is a response (should skip emitting event)
+static __always_inline bool
+is_http_response(__u32 pid, __u16 family, __u8 *saddr, __u16 sport, __u8 *daddr, __u16 dport)
+{
+    // Build reverse key to check if this matches a previous request
+    // If we're sending from server:well-known-port to client:ephemeral-port,
+    // check if there was a request from client:ephemeral-port to server:well-known-port
+    struct request_key reverse_key = {};
+    reverse_key.dst_ip = 0;
+    reverse_key.dst_port = sport;  // Our source port becomes destination
+    reverse_key.src_ip = 0;
+    reverse_key.src_port = dport;  // Our dest port becomes source
+
+    // Copy IPs based on family
+    if (family == AF_INET) {
+        __u32 sip = 0, dip = 0;
+        __builtin_memcpy(&sip, saddr, 4);
+        __builtin_memcpy(&dip, daddr, 4);
+        reverse_key.dst_ip = sip;
+        reverse_key.src_ip = dip;
+    }
+
+    // Look up reverse direction in active_requests
+    struct request_value *req = bpf_map_lookup_elem(&active_requests, &reverse_key);
+    
+    if (req != NULL) {
+        // This is a RESPONSE to a previous request
+        // Update timestamp for keep-alive tracking
+        req->timestamp = bpf_ktime_get_ns();
+        bpf_map_update_elem(&active_requests, &reverse_key, req, BPF_ANY);
+        return true;  // Signal caller to skip this event
+    }
+
+    // Not a response, track this as a new request
+    struct request_key forward_key = {};
+    forward_key.src_ip = 0;
+    forward_key.src_port = sport;
+    forward_key.dst_ip = 0;
+    forward_key.dst_port = dport;
+
+    if (family == AF_INET) {
+        __u32 sip = 0, dip = 0;
+        __builtin_memcpy(&sip, saddr, 4);
+        __builtin_memcpy(&dip, daddr, 4);
+        forward_key.src_ip = sip;
+        forward_key.dst_ip = dip;
+    }
+
+    struct request_value val = {};
+    val.timestamp = bpf_ktime_get_ns();
+    val.pid = pid;
+    bpf_map_update_elem(&active_requests, &forward_key, &val, BPF_ANY);
+
+    return false;  // This is a request, emit normally
 }
 
 /* -------------------- bind -------------------- */
@@ -457,6 +534,17 @@ int trace_sys_enter_sendto(struct sys_enter_args *ctx)
     struct conn_info *info = lookup_conn(pid, fd);
     if (info) {
         fill_event_conn(e, info);
+        
+        // Check if this is an HTTP response (only for IPv4 for now)
+        if (info->family == AF_INET) {
+            bool is_response = is_http_response(pid, info->family, info->saddr, 
+                                               info->sport, info->daddr, info->dport);
+            if (is_response) {
+                // This is a response, discard the event
+                bpf_ringbuf_discard(e, 0);
+                return 0;
+            }
+        }
     }
 
     bpf_probe_read_user(&e->data, copy_len, buf);
@@ -565,6 +653,17 @@ int trace_sys_enter_write(struct sys_enter_args *ctx)
     struct conn_info *info = lookup_conn(pid, fd);
     if (info) {
         fill_event_conn(e, info);
+        
+        // Check if this is an HTTP response (only for IPv4 for now)
+        if (info->family == AF_INET) {
+            bool is_response = is_http_response(pid, info->family, info->saddr, 
+                                               info->sport, info->daddr, info->dport);
+            if (is_response) {
+                // This is a response, discard the event
+                bpf_ringbuf_discard(e, 0);
+                return 0;
+            }
+        }
     }
 
     bpf_probe_read_user(&e->data, copy_len, buf);

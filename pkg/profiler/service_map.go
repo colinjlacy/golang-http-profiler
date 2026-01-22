@@ -315,10 +315,16 @@ func schemasEqual(a, b interface{}) bool {
 }
 
 // RecordHTTPEvent records an HTTP event and handles request/response correlation
-// Records from both client and server perspectives
+// Only processes "send" direction events - "recv" events are logged but not recorded to service map
 func (sm *ServiceMap) RecordHTTPEvent(event HTTPEventInfo) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	// Skip recv events - they are logged to JSON but not included in service map
+	// This prevents duplicate behaviors and self-referential connections
+	if event.Direction == "recv" {
+		return
+	}
 
 	// Normalize service names
 	srcService := event.SrcService

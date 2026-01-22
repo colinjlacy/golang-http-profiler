@@ -104,6 +104,20 @@ type ConnectionEvent struct {
 	DestinationType      string         `json:"destination_type,omitempty"` // "container" or "external"
 }
 
+// RequestKey matches the BPF map key for request tracking
+type RequestKey struct {
+	SrcIP   uint32
+	SrcPort uint16
+	DstIP   uint32
+	DstPort uint16
+}
+
+// RequestValue matches the BPF map value for request tracking
+type RequestValue struct {
+	Timestamp uint64
+	PID       uint32
+}
+
 type Runner struct {
 	targetPort          uint16
 	outputPath          string
@@ -395,6 +409,10 @@ func (r *Runner) Run(ctx context.Context) error {
 			_ = l.Close()
 		}
 	}()
+
+	// Start cleanup worker for active_requests map
+	go r.cleanupActiveRequests(ctx, objs.ActiveRequests)
+	log.Printf("started active_requests cleanup worker (120s timeout, 60s interval)")
 
 	rd, err := ringbuf.NewReader(objs.Events)
 	if err != nil {
@@ -1122,4 +1140,52 @@ func ensureMemlock() error {
 		return fmt.Errorf("set memlock limit: %w", err)
 	}
 	return nil
+}
+
+// cleanupActiveRequests removes stale entries from the active_requests BPF map
+func (r *Runner) cleanupActiveRequests(ctx context.Context, activeRequestsMap *ebpf.Map) {
+	ticker := time.NewTicker(60 * time.Second) // Run cleanup every 60 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("stopping active requests cleanup worker")
+			return
+		case <-ticker.C:
+			r.performCleanup(activeRequestsMap)
+		}
+	}
+}
+
+// performCleanup iterates through the active_requests map and removes stale entries
+func (r *Runner) performCleanup(activeRequestsMap *ebpf.Map) {
+	now := time.Now()
+	cutoff := now.Add(-120 * time.Second).UnixNano() // 120 second timeout
+
+	var key RequestKey
+	var val RequestValue
+	iter := activeRequestsMap.Iterate()
+	
+	deletedCount := 0
+	totalCount := 0
+
+	for iter.Next(&key, &val) {
+		totalCount++
+		if int64(val.Timestamp) < cutoff {
+			if err := activeRequestsMap.Delete(&key); err != nil {
+				log.Printf("warning: failed to delete stale request entry: %v", err)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		log.Printf("warning: error iterating active_requests map: %v", err)
+	}
+
+	if deletedCount > 0 {
+		log.Printf("cleaned up %d stale request entries (total: %d)", deletedCount, totalCount)
+	}
 }
