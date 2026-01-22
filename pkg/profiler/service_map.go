@@ -16,29 +16,33 @@ import (
 
 // EndpointInfo represents a unique destination+method+path combination with schema info
 type EndpointInfo struct {
-	Destination     string      `yaml:"destination"`                // destination service name
-	DestinationType string      `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
-	Method          string      `yaml:"method"`
-	Path            string      `yaml:"path"`
-	RequestSchema   interface{} `yaml:"request_schema"`  // null, "non-json", or JSON structure
-	ResponseSchema  interface{} `yaml:"response_schema"` // null, "non-json", or JSON structure
-	FirstSeen       time.Time   `yaml:"first_seen"`
-	LastSeen        time.Time   `yaml:"last_seen"`
-	Count           int64       `yaml:"count"`
+	Destination     string            `yaml:"destination"`                // destination service name
+	DestinationType string            `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
+	DestImage       string            `yaml:"-"`                          // destination image (not exported to YAML, used for workload creation)
+	DestLabels      map[string]string `yaml:"-"`                          // destination labels (not exported to YAML, used for workload creation)
+	Method          string            `yaml:"method"`
+	Path            string            `yaml:"path"`
+	RequestSchema   interface{}       `yaml:"request_schema"`  // null, "non-json", or JSON structure
+	ResponseSchema  interface{}       `yaml:"response_schema"` // null, "non-json", or JSON structure
+	FirstSeen       time.Time         `yaml:"first_seen"`
+	LastSeen        time.Time         `yaml:"last_seen"`
+	Count           int64             `yaml:"count"`
 }
 
 // ConnectionInfo represents a non-HTTP connection (database, cache, message bus)
 type ConnectionInfo struct {
-	Destination     string    `yaml:"destination"`                // destination service/host name
-	DestinationType string    `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
-	Protocol        string    `yaml:"protocol"`                   // e.g., "postgres", "mysql", "redis"
-	Category        string    `yaml:"category"`                   // e.g., "database", "cache", "message_bus"
-	Port            uint16    `yaml:"port"`                       // Remote port
-	Confidence      int       `yaml:"confidence"`                 // 0-100 confidence score
-	Reason          string    `yaml:"reason,omitempty"`           // Detection reason
-	FirstSeen       time.Time `yaml:"first_seen"`
-	LastSeen        time.Time `yaml:"last_seen"`
-	Count           int64     `yaml:"count"`
+	Destination     string            `yaml:"destination"`                // destination service/host name
+	DestinationType string            `yaml:"destination_type,omitempty"` // "container", "external", or "unknown"
+	DestImage       string            `yaml:"-"`                          // destination image (not exported to YAML, used for workload creation)
+	DestLabels      map[string]string `yaml:"-"`                          // destination labels (not exported to YAML, used for workload creation)
+	Protocol        string            `yaml:"protocol"`                   // e.g., "postgres", "mysql", "redis"
+	Category        string            `yaml:"category"`                   // e.g., "database", "cache", "message_bus"
+	Port            uint16            `yaml:"port"`                       // Remote port
+	Confidence      int               `yaml:"confidence"`                 // 0-100 confidence score
+	Reason          string            `yaml:"reason,omitempty"`           // Detection reason
+	FirstSeen       time.Time         `yaml:"first_seen"`
+	LastSeen        time.Time         `yaml:"last_seen"`
+	Count           int64             `yaml:"count"`
 }
 
 // ServiceProfile represents all outbound activity from a single service
@@ -59,6 +63,7 @@ type PendingRequest struct {
 	SrcLabels   map[string]string
 	DstService  string
 	DstImage    string
+	DstLabels   map[string]string
 	DstType     string
 	Method      string
 	Path        string
@@ -83,6 +88,7 @@ type HTTPEventInfo struct {
 	SrcLabels  map[string]string // source container labels
 	DstService string
 	DstImage   string
+	DstLabels  map[string]string // destination container labels
 	DstType    string
 }
 
@@ -94,12 +100,13 @@ type ConnectionEventInfo struct {
 	SrcLabels  map[string]string // source container labels
 	DstService string
 	DstImage   string
-	DstType    string // "container" or "external"
-	Protocol   string // e.g., "postgres", "mysql", "redis"
-	Category   string // e.g., "database", "cache", "message_bus"
-	Port       uint16 // Remote port
-	Confidence int    // 0-100
-	Reason     string // Detection reason
+	DstLabels  map[string]string // destination container labels
+	DstType    string            // "container" or "external"
+	Protocol   string            // e.g., "postgres", "mysql", "redis"
+	Category   string            // e.g., "database", "cache", "message_bus"
+	Port       uint16            // Remote port
+	Confidence int               // 0-100
+	Reason     string            // Detection reason
 }
 
 // ========================================================================
@@ -380,6 +387,8 @@ func (sm *ServiceMap) RecordConnectionEvent(event ConnectionEventInfo) {
 		newConn := &ConnectionInfo{
 			Destination:     dstService,
 			DestinationType: event.DstType,
+			DestImage:       event.DstImage,
+			DestLabels:      event.DstLabels,
 			Protocol:        event.Protocol,
 			Category:        event.Category,
 			Port:            event.Port,
@@ -429,6 +438,7 @@ func (sm *ServiceMap) handleRequest(event HTTPEventInfo, srcService, dstService 
 		SrcLabels:   event.SrcLabels,
 		DstService:  dstService,
 		DstImage:    event.DstImage,
+		DstLabels:   event.DstLabels,
 		DstType:     event.DstType,
 		Method:      event.Method,
 		Path:        event.URL,
@@ -455,7 +465,7 @@ func (sm *ServiceMap) handleResponse(event HTTPEventInfo, srcService, dstService
 
 	sm.recordEndpoint(
 		pendingReq.SrcService, pendingReq.SrcImage, pendingReq.SrcLabels,
-		pendingReq.DstService, pendingReq.DstType,
+		pendingReq.DstService, pendingReq.DstImage, pendingReq.DstLabels, pendingReq.DstType,
 		pendingReq.Method, pendingReq.Path,
 		requestSchema, responseSchema,
 	)
@@ -464,7 +474,7 @@ func (sm *ServiceMap) handleResponse(event HTTPEventInfo, srcService, dstService
 // recordEndpoint records an HTTP endpoint call
 func (sm *ServiceMap) recordEndpoint(
 	srcService, srcImage string, srcLabels map[string]string,
-	dstService, dstType,
+	dstService, dstImage string, dstLabels map[string]string, dstType,
 	method, path string,
 	requestSchema, responseSchema interface{},
 ) {
@@ -492,6 +502,8 @@ func (sm *ServiceMap) recordEndpoint(
 		newEndpoint := &EndpointInfo{
 			Destination:     dstService,
 			DestinationType: dstType,
+			DestImage:       dstImage,
+			DestLabels:      dstLabels,
 			Method:          method,
 			Path:            path,
 			RequestSchema:   requestSchema,
@@ -657,12 +669,13 @@ func mapConnectionToBehavior(sourceServiceName string, conn *ConnectionInfo) Obs
 
 // createInferredWorkload creates a WorkloadIdentity for a destination that wasn't directly profiled
 // (e.g., infrastructure services like postgres, redis, nats)
-func createInferredWorkload(destName string, firstSeen, lastSeen time.Time) WorkloadIdentity {
+func createInferredWorkload(destName, destImage string, destLabels map[string]string, firstSeen, lastSeen time.Time) WorkloadIdentity {
 	workloadID := fmt.Sprintf("workload:container/%s", destName)
 
-	return WorkloadIdentity{
+	workload := WorkloadIdentity{
 		ID:          workloadID,
 		DisplayName: destName,
+		Labels:      destLabels,
 		Evidence: WorkloadEvidence{
 			FirstSeen: firstSeen.Format(time.RFC3339Nano),
 			LastSeen:  lastSeen.Format(time.RFC3339Nano),
@@ -671,6 +684,14 @@ func createInferredWorkload(destName string, firstSeen, lastSeen time.Time) Work
 			},
 		},
 	}
+
+	if destImage != "" {
+		workload.Software = WorkloadSoftware{
+			Image: destImage,
+		}
+	}
+
+	return workload
 }
 
 // ========================================================================
@@ -765,6 +786,16 @@ func (sm *ServiceMap) transformToObservedBehaviors(generatedAt time.Time) *Obser
 		for _, endpoint := range profile.Endpoints {
 			behavior := mapEndpointToBehavior(profile.Name, endpoint)
 			behaviors = append(behaviors, behavior)
+
+			// Phase 3: Infer workloads for unprofiled HTTP destinations
+			if !workloadExists[behavior.Destination.WorkloadRef] {
+				// Extract destination name from the workloadRef (strip "workload:container/" prefix)
+				destName := strings.TrimPrefix(behavior.Destination.WorkloadRef, "workload:container/")
+				inferredWorkload := createInferredWorkload(destName, endpoint.DestImage, endpoint.DestLabels, endpoint.FirstSeen, endpoint.LastSeen)
+
+				workloadExists[inferredWorkload.ID] = true
+				workloads = append(workloads, inferredWorkload)
+			}
 		}
 
 		// Map non-HTTP connections
@@ -772,11 +803,11 @@ func (sm *ServiceMap) transformToObservedBehaviors(generatedAt time.Time) *Obser
 			behavior := mapConnectionToBehavior(profile.Name, conn)
 			behaviors = append(behaviors, behavior)
 
-			// Phase 3: Infer workloads for unprofiled destinations
+			// Phase 3: Infer workloads for unprofiled connection destinations
 			if !workloadExists[behavior.Destination.WorkloadRef] {
 				// Extract destination name from the workloadRef (strip "workload:container/" prefix)
 				destName := strings.TrimPrefix(behavior.Destination.WorkloadRef, "workload:container/")
-				inferredWorkload := createInferredWorkload(destName, conn.FirstSeen, conn.LastSeen)
+				inferredWorkload := createInferredWorkload(destName, conn.DestImage, conn.DestLabels, conn.FirstSeen, conn.LastSeen)
 
 				workloadExists[inferredWorkload.ID] = true
 				workloads = append(workloads, inferredWorkload)

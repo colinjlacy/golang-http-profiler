@@ -727,6 +727,7 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 		var srcLabels map[string]string
 		dstService := ""
 		dstImage := ""
+		var dstLabels map[string]string
 		dstType := event.DestinationType
 
 		// Get source container metadata
@@ -736,13 +737,13 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			if r.containerResolver != nil {
 				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
 			}
-			
+
 			srcService = event.SourceContainer.Service
 			if srcService == "" {
 				srcService = event.SourceContainer.ContainerName
 			}
 			srcImage = event.SourceContainer.Image
-			
+
 			if srcContainerMeta != nil {
 				srcLabels = srcContainerMeta.Labels
 			}
@@ -753,12 +754,27 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			}
 		}
 
+		// Get destination container metadata
+		var dstContainerMeta *ContainerMetadata
 		if event.DestinationContainer != nil {
 			dstService = event.DestinationContainer.Service
 			if dstService == "" {
 				dstService = event.DestinationContainer.ContainerName
 			}
 			dstImage = event.DestinationContainer.Image
+
+			// Resolve destination container to get full metadata including labels
+			if r.containerResolver != nil {
+				if ev.Direction == dirSend {
+					dstContainerMeta = r.containerResolver.ResolveDestination(daddr, dport)
+				} else {
+					dstContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				}
+
+				if dstContainerMeta != nil {
+					dstLabels = dstContainerMeta.Labels
+				}
+			}
 		}
 
 		// Default destination type if not set
@@ -782,6 +798,7 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 			SrcLabels:  srcLabels,
 			DstService: dstService,
 			DstImage:   dstImage,
+			DstLabels:  dstLabels,
 			DstType:    dstType,
 		})
 	}
@@ -922,6 +939,7 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 		var srcLabels map[string]string
 		dstService := ""
 		dstImage := ""
+		var dstLabels map[string]string
 		dstType := event.DestinationType
 
 		// Get source container metadata with labels
@@ -931,13 +949,13 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 			if r.containerResolver != nil {
 				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
 			}
-			
+
 			srcService = event.SourceContainer.Service
 			if srcService == "" {
 				srcService = event.SourceContainer.ContainerName
 			}
 			srcImage = event.SourceContainer.Image
-			
+
 			if srcContainerMeta != nil {
 				srcLabels = srcContainerMeta.Labels
 			}
@@ -948,12 +966,27 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 			}
 		}
 
+		// Get destination container metadata
+		var dstContainerMeta *ContainerMetadata
 		if event.DestinationContainer != nil {
 			dstService = event.DestinationContainer.Service
 			if dstService == "" {
 				dstService = event.DestinationContainer.ContainerName
 			}
 			dstImage = event.DestinationContainer.Image
+
+			// Resolve destination container to get full metadata including labels
+			if r.containerResolver != nil {
+				if ev.Direction == dirSend {
+					dstContainerMeta = r.containerResolver.ResolveDestination(daddr, dport)
+				} else {
+					dstContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				}
+
+				if dstContainerMeta != nil {
+					dstLabels = dstContainerMeta.Labels
+				}
+			}
 		}
 
 		// Default destination type if not set
@@ -968,6 +1001,7 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 			SrcLabels:  srcLabels,
 			DstService: dstService,
 			DstImage:   dstImage,
+			DstLabels:  dstLabels,
 			DstType:    dstType,
 			Protocol:   event.Protocol,
 			Category:   event.Category,
