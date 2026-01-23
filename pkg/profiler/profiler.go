@@ -712,9 +712,11 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 				event.DestinationType = "external"
 			}
 		} else {
-			// Recv event: PID is receiver, source IP is sender
-			// Swap the resolution logic to keep source = sender, destination = receiver
-			if srcMeta := r.containerResolver.ResolveDestination(saddr, sport); srcMeta != nil {
+			// Recv event: PID is receiver
+			// Note: For recv events, saddr/sport is the LOCAL side (receiver),
+			// and daddr/dport is the REMOTE side (sender)
+			// We need to resolve the remote side (sender) to find who sent to us
+			if srcMeta := r.containerResolver.ResolveDestination(daddr, dport); srcMeta != nil {
 				event.SourceContainer = &ContainerInfo{
 					Service:       srcMeta.Service,
 					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
@@ -751,9 +753,15 @@ func (r *Runner) formatEventJSON(ev *Event, parsed Parsed) (string, error) {
 		// Get source container metadata
 		var srcContainerMeta *ContainerMetadata
 		if event.SourceContainer != nil {
-			// Resolve from existing SourceContainer info to get full metadata including labels
+			// Resolve to get full metadata including labels
 			if r.containerResolver != nil {
-				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				if ev.Direction == dirSend {
+					// Send: PID is sender (source)
+					srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				} else {
+					// Recv: remote is sender (source)
+					srcContainerMeta = r.containerResolver.ResolveDestination(daddr, dport)
+				}
 			}
 
 			srcService = event.SourceContainer.Service
@@ -925,8 +933,11 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 				event.DestinationType = "external"
 			}
 		} else {
-			// Recv event: PID is receiver, source IP is sender
-			if srcMeta := r.containerResolver.ResolveDestination(saddr, sport); srcMeta != nil {
+			// Recv event: PID is receiver
+			// Note: For recv events, saddr/sport is the LOCAL side (receiver), 
+			// and daddr/dport is the REMOTE side (sender)
+			// We need to resolve the remote side (sender) to find who sent to us
+			if srcMeta := r.containerResolver.ResolveDestination(daddr, dport); srcMeta != nil {
 				event.SourceContainer = &ContainerInfo{
 					Service:       srcMeta.Service,
 					Image:         fmt.Sprintf("%s:%s", srcMeta.Image, srcMeta.ImageTag),
@@ -965,7 +976,13 @@ func (r *Runner) tryClassifyAndFormatConnection(ev *Event) (string, error) {
 		if event.SourceContainer != nil {
 			// Resolve to get full metadata including labels
 			if r.containerResolver != nil {
-				srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				if ev.Direction == dirSend {
+					// Send: PID is sender (source)
+					srcContainerMeta = r.containerResolver.ResolvePIDToContainer(ev.Pid)
+				} else {
+					// Recv: remote is sender (source)
+					srcContainerMeta = r.containerResolver.ResolveDestination(daddr, dport)
+				}
 			}
 
 			srcService = event.SourceContainer.Service
