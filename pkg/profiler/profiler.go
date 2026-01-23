@@ -1166,7 +1166,7 @@ func (r *Runner) performCleanup(activeRequestsMap *ebpf.Map) {
 	var key RequestKey
 	var val RequestValue
 	iter := activeRequestsMap.Iterate()
-	
+
 	deletedCount := 0
 	totalCount := 0
 

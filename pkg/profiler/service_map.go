@@ -315,14 +315,18 @@ func schemasEqual(a, b interface{}) bool {
 }
 
 // RecordHTTPEvent records an HTTP event and handles request/response correlation
-// Only processes "send" direction events - "recv" events are logged but not recorded to service map
+// Processes request sends and response recvs, skipping request recvs to avoid duplicates
 func (sm *ServiceMap) RecordHTTPEvent(event HTTPEventInfo) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Skip recv events - they are logged to JSON but not included in service map
-	// This prevents duplicate behaviors and self-referential connections
-	if event.Direction == "recv" {
+	// Skip request recv events (server-side) to avoid duplicate behaviors
+	// BPF filters response sends (server → client), so we only see:
+	// 1. Request sends (client → server) - KEEP for tracking
+	// 2. Request recvs (client → server, server POV) - SKIP to avoid duplicates
+	// 3. Response recvs (server → client, client POV) - KEEP for correlation
+	if event.Direction == "recv" && event.Method != "" && event.StatusCode == "" {
+		// This is a request recv (server receiving request) - skip it
 		return
 	}
 
@@ -342,10 +346,10 @@ func (sm *ServiceMap) RecordHTTPEvent(event HTTPEventInfo) {
 
 	// Handle based on event type
 	if event.Method != "" && event.StatusCode == "" {
-		// This is a request (either send from client or recv by server)
+		// This is a request send (client → server)
 		sm.handleRequest(event, srcService, dstService)
 	} else if event.StatusCode != "" {
-		// This is a response (either recv by client or send from server)
+		// This is a response recv (client receiving response)
 		sm.handleResponse(event, srcService, dstService)
 	}
 }

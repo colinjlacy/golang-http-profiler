@@ -319,28 +319,55 @@ fill_event_conn(struct http_event *e, struct conn_info *info)
     copy_bytes(e->daddr, info->daddr, 16);
 }
 
+// Extract IPv4 address from IPv6-mapped IPv4 address or regular IPv4
+static __always_inline __u32 extract_ipv4(__u16 family, __u8 *addr)
+{
+    if (family == AF_INET) {
+        __u32 ip = 0;
+        __builtin_memcpy(&ip, addr, 4);
+        return ip;
+    } else if (family == AF_INET6) {
+        // Check for IPv4-mapped IPv6 address (::ffff:x.x.x.x)
+        // Format: [0,0,0,0, 0,0,0,0, 0,0,0xff,0xff, a,b,c,d]
+        bool is_mapped = true;
+        for (int i = 0; i < 10; i++) {
+            if (addr[i] != 0) {
+                is_mapped = false;
+                break;
+            }
+        }
+        if (is_mapped && addr[10] == 0xff && addr[11] == 0xff) {
+            // Extract the last 4 bytes as IPv4 address
+            __u32 ip = 0;
+            __builtin_memcpy(&ip, addr + 12, 4);
+            return ip;
+        }
+    }
+    return 0;
+}
+
 // Check if this is an HTTP response and update tracking maps
 // Returns true if this is a response (should skip emitting event)
 static __always_inline bool
 is_http_response(__u32 pid, __u16 family, __u8 *saddr, __u16 sport, __u8 *daddr, __u16 dport)
 {
+    // Extract IPv4 addresses (handles both AF_INET and IPv4-mapped AF_INET6)
+    __u32 sip = extract_ipv4(family, saddr);
+    __u32 dip = extract_ipv4(family, daddr);
+    
+    // Skip if we couldn't extract valid IPv4 addresses
+    if (sip == 0 || dip == 0) {
+        return false;
+    }
+
     // Build reverse key to check if this matches a previous request
     // If we're sending from server:well-known-port to client:ephemeral-port,
     // check if there was a request from client:ephemeral-port to server:well-known-port
     struct request_key reverse_key = {};
-    reverse_key.dst_ip = 0;
+    reverse_key.dst_ip = sip;      // Our source IP becomes destination
     reverse_key.dst_port = sport;  // Our source port becomes destination
-    reverse_key.src_ip = 0;
+    reverse_key.src_ip = dip;      // Our dest IP becomes source
     reverse_key.src_port = dport;  // Our dest port becomes source
-
-    // Copy IPs based on family
-    if (family == AF_INET) {
-        __u32 sip = 0, dip = 0;
-        __builtin_memcpy(&sip, saddr, 4);
-        __builtin_memcpy(&dip, daddr, 4);
-        reverse_key.dst_ip = sip;
-        reverse_key.src_ip = dip;
-    }
 
     // Look up reverse direction in active_requests
     struct request_value *req = bpf_map_lookup_elem(&active_requests, &reverse_key);
@@ -355,18 +382,10 @@ is_http_response(__u32 pid, __u16 family, __u8 *saddr, __u16 sport, __u8 *daddr,
 
     // Not a response, track this as a new request
     struct request_key forward_key = {};
-    forward_key.src_ip = 0;
+    forward_key.src_ip = sip;
     forward_key.src_port = sport;
-    forward_key.dst_ip = 0;
+    forward_key.dst_ip = dip;
     forward_key.dst_port = dport;
-
-    if (family == AF_INET) {
-        __u32 sip = 0, dip = 0;
-        __builtin_memcpy(&sip, saddr, 4);
-        __builtin_memcpy(&dip, daddr, 4);
-        forward_key.src_ip = sip;
-        forward_key.dst_ip = dip;
-    }
 
     struct request_value val = {};
     val.timestamp = bpf_ktime_get_ns();
@@ -535,15 +554,13 @@ int trace_sys_enter_sendto(struct sys_enter_args *ctx)
     if (info) {
         fill_event_conn(e, info);
         
-        // Check if this is an HTTP response (only for IPv4 for now)
-        if (info->family == AF_INET) {
-            bool is_response = is_http_response(pid, info->family, info->saddr, 
-                                               info->sport, info->daddr, info->dport);
-            if (is_response) {
-                // This is a response, discard the event
-                bpf_ringbuf_discard(e, 0);
-                return 0;
-            }
+        // Check if this is an HTTP response (handles IPv4 and IPv6-mapped IPv4)
+        bool is_response = is_http_response(pid, info->family, info->saddr, 
+                                           info->sport, info->daddr, info->dport);
+        if (is_response) {
+            // This is a response, discard the event
+            bpf_ringbuf_discard(e, 0);
+            return 0;
         }
     }
 
@@ -654,15 +671,13 @@ int trace_sys_enter_write(struct sys_enter_args *ctx)
     if (info) {
         fill_event_conn(e, info);
         
-        // Check if this is an HTTP response (only for IPv4 for now)
-        if (info->family == AF_INET) {
-            bool is_response = is_http_response(pid, info->family, info->saddr, 
-                                               info->sport, info->daddr, info->dport);
-            if (is_response) {
-                // This is a response, discard the event
-                bpf_ringbuf_discard(e, 0);
-                return 0;
-            }
+        // Check if this is an HTTP response (handles IPv4 and IPv6-mapped IPv4)
+        bool is_response = is_http_response(pid, info->family, info->saddr, 
+                                           info->sport, info->daddr, info->dport);
+        if (is_response) {
+            // This is a response, discard the event
+            bpf_ringbuf_discard(e, 0);
+            return 0;
         }
     }
 
