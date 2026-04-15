@@ -160,67 +160,197 @@ IF a `name` is applied to a Condition, then the `name` MUST be unique within the
 
 # 6. Core Condition Kinds
 
-The following Condition kinds are defined in the **core specification**.
+The core specification defines a set of **capability classes**, referred to as
+**Kinds**, that represent common categories of externally satisfied
+runtime dependencies.
 
-| Kind | Interface | Allowed subtype / protocol values |
-|------|-----------|-----------------------------------|
-| `service` | `http` | protocols: `http`, `https` |
-| `datastore` | `datastore` | types: `relational`, `document` |
-| `cache` | `cache` | protocols: `redis`, `memcached` |
-| `message_bus` | `messageBus` | protocols: `nats`, `kafka`, `amqp`, `mqtt` |
+Each Condition MUST declare exactly one `kind`.
 
----
+Kinds represent **broad capability families**, not specific technologies.
 
-# 7. Core Kind-to-Interface Validity Matrix
+The following core kinds are defined:
 
-This matrix defines the valid interface shapes and protocol values permitted for each core kind.
+- `service` — External service integrations such as APIs
+- `datastore` — Persistent data storage systems
+- `cache` — Volatile data storage optimized for fast access
+- `message_bus` — Messaging and event distribution systems
 
-| Kind | Interface | Allowed Protocols |
-|------|-----------|-------------------|
-| `service.http` | `http` | `http`, `https` |
-| `datastore.relational` | `datastore` | `postgres`, `mysql`, `mariadb`, `sqlserver`, `oracle`, `sqlite` |
-| `datastore.document` | `datastore` | `mongodb`, `couchbase` |
-| `cache` | `cache` | `redis`, `memcached` |
-| `message_bus` | `messageBus` | `nats`, `kafka`, `amqp`, `mqtt` |
+These kinds are intentionally broad to allow multiple interaction models
+to exist within the same capability family.
 
 ---
 
-# 8. Interface Definitions
+# 7. Interface Model
 
-Each Condition kind requires a specific interface block.
+Each Condition MUST define an `interface` block describing how the workload
+interacts with the declared capability.
 
----
+The `interface` block defines:
 
-# 8.1 HTTP Service Interface
+- The **interaction model**
+- The **matching characteristics**
+- Any **additional details required for fulfillment matching**
+
+## Interface Structure
 
 ```yaml
 interface:
-  http:
-    protocol: https
-    operations:
-      - method: POST
-        path: /charge
-        requestBodySchema: {}
-        responseSchema: {}
+  type: <interface-type>
 ```
 
-## Required Fields
+The `type` field identifies the interaction model associated with the
+declared `kind`.
 
-| Field | Requirement |
-|------|--------------|
-| `protocol` | MUST be `http` or `https` |
-| `operations` | MUST be non-empty list |
+Additional fields MAY be required depending on the selected interface type.
 
-## Operation Fields
+Interface definitions are validated based on:
 
-| Field | Required |
-|------|----------|
-| `method` | YES |
-| `path` | YES |
-| `requestBodySchema` | OPTIONAL |
-| `responseSchema` | OPTIONAL |
+- The declared `kind`
+- The declared `interface.type`
+- Core validation rules
+- Extension validation rules (when applicable)
 
-## Allowed HTTP Methods
+---
+
+# 8. Core Interface Types
+
+This section describes the **structure and purpose** of core interface
+types. Allowed interface types are validated separately in the
+validation section.
+
+---
+
+## 8.1 Service Interface
+
+Service interfaces describe callable external services such as APIs.
+
+Service interfaces typically define:
+
+- Request methods
+- Request paths
+- Optional request schemas
+- Optional response schemas
+
+Example:
+
+```yaml
+kind: service
+
+interface:
+  type: http
+  operations:
+    - method: POST
+      path: /charge
+      requestBodySchema: {}
+      responseSchema: {}
+```
+
+### Operation Fields
+
+| Field | Required | Description |
+|------|----------|-------------|
+| `method` | YES | HTTP method |
+| `path` | YES | Request path |
+| `requestBodySchema` | NO | Request body schema |
+| `responseSchema` | NO | Response schema |
+
+### Validation Expectations
+
+- `operations` MUST be non-empty
+- `method` MUST be a valid HTTP method
+- `path` MUST be a non-empty string
+- Schema fields remain open-ended
+
+---
+
+## 8.2 Datastore Interface
+
+Datastore interfaces describe persistent storage systems.
+
+Datastore interfaces identify the storage model used by the workload.
+
+Example:
+
+```yaml
+kind: datastore
+
+interface:
+  type: relational
+```
+
+Additional optional fields MAY be defined by extensions.
+
+---
+
+## 8.3 Cache Interface
+
+Cache interfaces describe volatile key/value storage systems.
+
+Example:
+
+```yaml
+kind: cache
+
+interface:
+  type: redis
+```
+
+---
+
+## 8.4 Message Bus Interface
+
+Message bus interfaces describe messaging or event systems.
+
+Example:
+
+```yaml
+kind: message_bus
+
+interface:
+  type: kafka
+```
+
+---
+
+# 9. Core Validation Rules
+
+Validation ensures that Conditions are structurally correct and
+semantically consistent.
+
+Validation occurs in multiple phases.
+
+---
+
+## 9.1 Structural Validation
+
+A Condition is invalid if:
+
+- `kind` is missing
+- `interface` is missing
+- `interface.type` is missing
+
+If a `name` field is provided, it MUST be unique within the profile.
+
+---
+
+## 9.2 Kind-to-Interface Type Validation
+
+Each `kind` supports a defined set of valid `interface.type` values.
+
+The following interface types are valid for core kinds:
+
+### Service
+
+Allowed interface types:
+
+- `http`
+
+Additional validation rules:
+
+- `operations` MUST be present
+- `operations` MUST NOT be empty
+
+Allowed HTTP Methods:
 
 - GET  
 - HEAD  
@@ -231,100 +361,79 @@ interface:
 - OPTIONS  
 - TRACE  
 
-## Validation Rules
+---
 
-- `operations` MUST NOT be empty
-- `path` MUST be non-empty string
-- `method` MUST be valid HTTP method
-- `requestBodySchema` MUST NOT be used with GET or HEAD
-- Schema fields MUST remain open-ended
+### Datastore
+
+Allowed interface types:
+
+- `relational`
+- `document`
 
 ---
 
-# 8.2 Datastore Interface
+### Cache
+
+Allowed interface types:
+
+- `redis`
+- `memcached`
+
+---
+
+### Message Bus
+
+Allowed interface types:
+
+- `nats`
+- `kafka`
+- `amqp`
+- `mqtt`
+
+---
+
+## 9.3 Invalid Condition Examples
+
+Invalid relational datastore example:
 
 ```yaml
+kind: datastore
+
 interface:
-  datastore:
-    protocol: postgres
+  type: mongodb
 ```
 
-## Validation Rules
-
-- `protocol` MUST be valid for declared kind
-- HTTP operations MUST NOT appear
-
----
-
-# 8.3 Cache Interface
-
-```yaml
-interface:
-  cache:
-    protocol: redis
-```
-
----
-
-# 8.4 Message Bus Interface
-
-```yaml
-interface:
-  messageBus:
-    protocol: nats
-```
-
----
-
-# 9. Core Validation Rules
-
-## 9.1 Structural Validation
-
-A Condition is invalid if:
-
-- `name` is missing
-- `kind` is missing
-- `interface` is missing
-
----
-
-## 9.2 Kind-to-Interface Validation
-
-A Condition MUST:
-
-- Use the interface required by its `kind`
-- Use only permitted protocol values
-- Avoid incompatible interface blocks
-
-Invalid examples:
-
-```yaml
-kind: datastore.relational
-interface:
-  datastore:
-    protocol: mongodb
-```
+Invalid interface type for cache:
 
 ```yaml
 kind: cache
+
 interface:
-  http:
-    protocol: https
+  type: relational
+```
+
+Invalid service definition:
+
+```yaml
+kind: service
+
+interface:
+  type: http
+  operations: []
 ```
 
 ---
 
 # 10. Extension Model
 
-The Runtime Conditions Profile supports vendor-defined extensions.
+The Runtime Conditions Profile supports extension-defined vocabulary.
 
 Extensions allow:
 
 - New kinds
-- New interfaces
-- New protocol values
-- Optional interface fields
-- Additional semantic rules
+- New interface types
+- New interface fields
+- Additional validation rules
 
 Extensions MUST NOT redefine core semantics incompatibly.
 
@@ -332,7 +441,8 @@ Extensions MUST NOT redefine core semantics incompatibly.
 
 # 11. Extension Declaration
 
-Profiles that use extension-defined terms MUST declare them.
+Profiles that reference extension-defined vocabulary MUST declare
+those extensions.
 
 ```yaml
 extensions:
@@ -345,7 +455,7 @@ extensions:
 
 # 12. Extension Definition Structure
 
-Extensions are declared as separate artifacts.
+Extensions are defined as independent artifacts.
 
 ```yaml
 apiVersion: runtimeconditions.io/v1alpha1
@@ -359,25 +469,19 @@ spec:
 
   kinds:
     - name: aws.object_store
-      interface: objectStore
-      protocols:
-        - aws.s3
 
-  interfaces:
-    - name: objectStore
-      fields:
-        - name: protocol
-          required: true
+  interfaceTypes:
+    - name: object_store
 
-  protocolExtensions:
+  typeExtensions:
     - targetKind: cache
-      addProtocols:
+      addTypes:
         - valkey
 
   validationRules:
     - id: cache-valkey
       appliesToKind: cache
-      rule: protocol in ["redis","memcached","valkey"]
+      rule: type in ["redis","memcached","valkey"]
 ```
 
 ---
@@ -389,9 +493,8 @@ Extensions MAY:
 | Action | Description |
 |-------|-------------|
 | Add Kind | Introduce new namespaced kind |
-| Add Interface | Define new interface type |
-| Add Protocol | Extend allowed protocol list |
-| Add Optional Fields | Extend interface schema |
+| Add Interface Type | Define new interface types |
+| Add Fields | Extend interface schema |
 | Add Rules | Add semantic validation |
 
 ---
@@ -424,10 +527,10 @@ acme.streaming_bus
 
 # 16. Unknown Extension Handling
 
-If an extension is declared but unavailable:
+If a referenced extension cannot be resolved:
 
-- Profile MUST be marked unresolved
-- Conditions using unknown vocabulary MUST be invalid
+- The profile MUST be marked unresolved
+- Conditions referencing unknown types MUST be invalid
 
 ---
 
@@ -451,31 +554,32 @@ kind: RuntimeConditionsProfile
 metadata:
   name: checkout-service
 
+workload:
+  uri: https://github.com/example-org/checkout-service
+  version: v1.2.3
+
 extensions:
   - core
 
 conditions:
 
   - name: primary-db
-    kind: datastore.relational
+    kind: datastore
     interface:
-      datastore:
-        protocol: postgres
+      type: relational
 
   - name: session-cache
     kind: cache
     interface:
-      cache:
-        protocol: redis
+      type: redis
 
   - name: payments-api
-    kind: service.http
+    kind: service
     interface:
-      http:
-        protocol: https
-        operations:
-          - method: POST
-            path: /charge
+      type: http
+      operations:
+        - method: POST
+          path: /charge
 ```
 
 ---
@@ -489,6 +593,10 @@ kind: RuntimeConditionsProfile
 metadata:
   name: storage-enabled
 
+workload:
+  uri: https://github.com/example-org/storage-service
+  version: v1.4.0
+
 extensions:
   - core
   - aws.runtime/v1alpha1
@@ -498,8 +606,7 @@ conditions:
   - name: object-storage
     kind: aws.object_store
     interface:
-      objectStore:
-        protocol: aws.s3
+      type: object_store
 ```
 
 ---
@@ -508,6 +615,7 @@ conditions:
 
 Possible future extensions include:
 
+- GraphQL service interfaces
 - Authentication hints
 - TLS requirements
 - Data durability requirements
@@ -523,9 +631,10 @@ These are intentionally excluded from v0.1.
 The Runtime Conditions Profile defines:
 
 - A portable dependency declaration format
-- A constrained validation matrix
-- A structured extension system
-- Vendor-neutral semantics
+- A structured interface typing model
 - Deterministic validation behavior
+- A declarative extension mechanism
+- Vendor-neutral semantics
 
-This provides a foundation for reliable downstream capability matching while preserving ecosystem flexibility.
+This provides a foundation for reliable downstream capability
+matching while preserving ecosystem flexibility.
