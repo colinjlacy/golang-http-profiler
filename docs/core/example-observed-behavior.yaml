@@ -1,0 +1,387 @@
+apiVersion: adi.dev/v1alpha1
+kind: ObservedBehaviors
+metadata:
+  name: http-profiler-local-2026-03-14t154909z
+spec:
+  generatedAt: "2026-03-14T15:49:09.266296279-04:00"
+  observationEngines:
+    - ref: observationengine/golang-http-profiler
+  environment:
+    observed: local
+  workloads:
+    - id: workload:container/nats-server
+      displayName: nats-server
+      software:
+        image: docker.io/library/nats:2-alpine
+      labels:
+        app.component: message-bus
+        app.role: message-broker
+        app.tier: infrastructure
+        com.docker.compose.config-hash: 1a58fb56cd1c978989ae097119c5193baa48821428732a670de5d8d0cf1c7f20
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: nats-server
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGTERM
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-3260993895/cid","Devices":null}'
+        nerdctl/hostname: nats-server
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/name: http-profiler-nats-server-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/44634e269eb4de80e60adab9c163e2ca204a871a10575c9f8fce7d458e1dad30
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.670028619-04:00"
+        lastSeen: "2026-03-14T15:48:39.936319657-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/request-logger
+      displayName: request-logger
+      software:
+        image: docker.io/library/http-profiler-request-logger:latest
+      labels:
+        app.component: event-consumer
+        app.role: logger
+        app.tier: backend
+        com.docker.compose.config-hash: fba6b93eacd22a14401e567ba04d2283b0f809ae07a4b3a6e57e7c97f890f82d
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: request-logger
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGTERM
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-2823119703/cid","Devices":null}'
+        nerdctl/hostname: request-logger
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/name: http-profiler-request-logger-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/e23da723904e32ce0e85b532b184de9e600216dd180d2e77ec527c1d934c50d9
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.67590973-04:00"
+        lastSeen: "2026-03-14T15:48:39.67590973-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/traffic
+      displayName: traffic
+      software:
+        image: docker.io/library/http-profiler-traffic:latest
+      labels:
+        app.component: load-generator
+        app.role: test-client
+        app.tier: testing
+        com.docker.compose.config-hash: a048e73e66ac0f65cfaa8a59e9d2aa21d173bffc4554612b35a764104c3e9dab
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: traffic
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGTERM
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-2267725570/cid","Devices":null}'
+        nerdctl/hostname: traffic
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/name: http-profiler-traffic-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/e9f1629d354c388d2e7bde587b99f87414cd09d1715b3014376db4477db39e3d
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.14442744-04:00"
+        lastSeen: "2026-03-14T15:48:48.815350028-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/http-service
+      displayName: http-service
+      software:
+        image: docker.io/library/http-profiler-http-service:latest
+      labels:
+        app.component: api
+        app.role: web-server
+        app.tier: backend
+        com.docker.compose.config-hash: c27224471c0b93be0a78cff56b0ae9201a5a6eaa647614e7a6b2a12bbf71f221
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: http-service
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGTERM
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-920490619/cid","Devices":null}'
+        nerdctl/hostname: http-service
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/name: http-profiler-http-service-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/122aefb78c512501bcc71a5dcb967db64201e893926c3cd954d8a886114b421f
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.936319657-04:00"
+        lastSeen: "2026-03-14T15:48:39.936319657-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/redis
+      displayName: redis
+      software:
+        image: docker.io/library/redis:7-alpine
+      labels:
+        app.component: key-value-store
+        app.role: cache
+        app.tier: data
+        com.docker.compose.config-hash: de5f8a4835d3fff89dc4e76080c888665dc74ac632dacdbbac65160ad2c1e9c5
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: redis
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGTERM
+        nerdctl/anonymous-volumes: '["b19677c32fcaa52205a5ceaeb562d5f0b3ec4dcdea9880986ae7c68283328d25"]'
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-1963973480/cid","Devices":null}'
+        nerdctl/hostname: redis
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/mounts: '[{"Type":"volume","Name":"b19677c32fcaa52205a5ceaeb562d5f0b3ec4dcdea9880986ae7c68283328d25","Source":"/home/lima.linux/.local/share/nerdctl/1935db59/volumes/default/b19677c32fcaa52205a5ceaeb562d5f0b3ec4dcdea9880986ae7c68283328d25/_data","Destination":"/data","Driver":"local","Mode":"","RW":true,"Propagation":""}]'
+        nerdctl/name: http-profiler-redis-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/4451bafba0888de99c16341e56f0255b72eb5557a88b1fa56ffc86821f867638
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.67590973-04:00"
+        lastSeen: "2026-03-14T15:48:39.67590973-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: workload:container/postgres
+      displayName: postgres
+      software:
+        image: docker.io/library/postgres:15-alpine
+      labels:
+        app.component: relational-db
+        app.role: database
+        app.tier: data
+        com.docker.compose.config-hash: 39ba01d2015c17e690f1aeb884c326dade770dc79304c10a27f914096786272a
+        com.docker.compose.project: http-profiler
+        com.docker.compose.service: postgres
+        containerd.io/restart.explicitly-stopped: "false"
+        io.containerd.image.config.stop-signal: SIGINT
+        nerdctl/anonymous-volumes: '["00a56017e53747066eca77ff543b1b7f5aa96db018346254e1e663c723a0ed1e"]'
+        nerdctl/auto-remove: "false"
+        nerdctl/dns: '{"DNSServers":null,"DNSResolvConfOptions":null,"DNSSearchDomains":null}'
+        nerdctl/extraHosts: '[]'
+        nerdctl/host-config: '{"BlkioWeight":0,"CidFile":"/tmp/compose-2990775264/cid","Devices":null}'
+        nerdctl/hostname: postgres
+        nerdctl/ipc: '{"mode":"private"}'
+        nerdctl/log-config: '{"driver":"json-file","address":"/run/containerd/containerd.sock"}'
+        nerdctl/log-uri: binary:///usr/local/bin/nerdctl?_NERDCTL_INTERNAL_LOGGING=%2Fhome%2Flima.linux%2F.local%2Fshare%2Fnerdctl%2F1935db59
+        nerdctl/mounts: '[{"Type":"volume","Name":"00a56017e53747066eca77ff543b1b7f5aa96db018346254e1e663c723a0ed1e","Source":"/home/lima.linux/.local/share/nerdctl/1935db59/volumes/default/00a56017e53747066eca77ff543b1b7f5aa96db018346254e1e663c723a0ed1e/_data","Destination":"/var/lib/postgresql/data","Driver":"local","Mode":"","RW":true,"Propagation":""}]'
+        nerdctl/name: http-profiler-postgres-1
+        nerdctl/namespace: default
+        nerdctl/networks: '["http-profiler_default"]'
+        nerdctl/platform: linux/arm64/v8
+        nerdctl/state-dir: /home/lima.linux/.local/share/nerdctl/1935db59/containers/default/52531c541d5b984397de62e1d2beafb0e38bcbc2653d31babc2eea932a02f7cf
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.14442744-04:00"
+        lastSeen: "2026-03-14T15:48:40.14442744-04:00"
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+  behaviors:
+    - id: behavior:nats-server:tcp:request-logger:4222:nats
+      sourceRef: workload:container/nats-server
+      destination:
+        workloadRef: workload:container/request-logger
+      facets:
+        protocol:
+          name: nats
+          category: message_bus
+          classificationConfidence: 0.9
+          classificationReason: NATS INFO line
+        network:
+          transport: tcp
+          port: 4222
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.670028619-04:00"
+        lastSeen: "2026-03-14T15:48:39.670028619-04:00"
+        count: 1
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:nats-server:tcp:http-service:4222:nats
+      sourceRef: workload:container/nats-server
+      destination:
+        workloadRef: workload:container/http-service
+      facets:
+        protocol:
+          name: nats
+          category: message_bus
+          classificationConfidence: 0.9
+          classificationReason: NATS INFO line
+        network:
+          transport: tcp
+          port: 4222
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.936319657-04:00"
+        lastSeen: "2026-03-14T15:48:39.936319657-04:00"
+        count: 1
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:request-logger:tcp:redis:6379:redis
+      sourceRef: workload:container/request-logger
+      destination:
+        workloadRef: workload:container/redis
+      facets:
+        protocol:
+          name: redis
+          category: cache
+          classificationConfidence: 0.9
+          classificationReason: redis RESP array
+        network:
+          transport: tcp
+          port: 6379
+      evidence:
+        firstSeen: "2026-03-14T15:48:39.67590973-04:00"
+        lastSeen: "2026-03-14T15:48:39.67590973-04:00"
+        count: 1
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:http:http-service:GET:/
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/http-service
+      facets:
+        protocol:
+          name: http
+        interface:
+          http:
+            method: GET
+            path: /
+            requestSchema: null
+            responseSchema: non-json
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.155017199-04:00"
+        lastSeen: "2026-03-14T15:48:48.407874081-04:00"
+        count: 10
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:http:http-service:GET:/healthz
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/http-service
+      facets:
+        protocol:
+          name: http
+        interface:
+          http:
+            method: GET
+            path: /healthz
+            requestSchema: null
+            responseSchema:
+              status: string
+              time: string
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.155141663-04:00"
+        lastSeen: "2026-03-14T15:48:48.410105705-04:00"
+        count: 10
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:http:http-service:POST:/echo
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/http-service
+      facets:
+        protocol:
+          name: http
+        interface:
+          http:
+            method: POST
+            path: /echo
+            requestSchema:
+              message: string
+            responseSchema:
+              message: string
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.158319624-04:00"
+        lastSeen: "2026-03-14T15:48:48.41068633-04:00"
+        count: 10
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:http:http-service:GET:/slow
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/http-service
+      facets:
+        protocol:
+          name: http
+        interface:
+          http:
+            method: GET
+            path: /slow
+            requestSchema: null
+            responseSchema: non-json
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.557723472-04:00"
+        lastSeen: "2026-03-14T15:48:48.815350028-04:00"
+        count: 10
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:tcp:postgres:5432:postgres
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/postgres
+      facets:
+        protocol:
+          name: postgres
+          category: database
+          classificationConfidence: 0.9
+          classificationReason: port 5432, valid Postgres startup/SSLRequest header
+        network:
+          transport: tcp
+          port: 5432
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.14442744-04:00"
+        lastSeen: "2026-03-14T15:48:40.14442744-04:00"
+        count: 1
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+    - id: behavior:traffic:tcp:redis:6379:redis
+      sourceRef: workload:container/traffic
+      destination:
+        workloadRef: workload:container/redis
+      facets:
+        protocol:
+          name: redis
+          category: cache
+          classificationConfidence: 0.9
+          classificationReason: redis RESP array
+        network:
+          transport: tcp
+          port: 6379
+      evidence:
+        firstSeen: "2026-03-14T15:48:40.153901529-04:00"
+        lastSeen: "2026-03-14T15:48:40.153901529-04:00"
+        count: 1
+        observerConfidence: 1
+        sources:
+          - engineRef: observationengine/golang-http-profiler
+
