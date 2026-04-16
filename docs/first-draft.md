@@ -24,7 +24,6 @@ These capabilities may include:
 - HTTP services
 - Relational databases
 - Caches
-- Message buses
 - Vendor-defined integration services
 
 The Runtime Conditions Profile:
@@ -126,19 +125,17 @@ extensions:
 
 conditions:
   - name: primary-db
-    kind: datastore.relational
+    kind: datastore
     interface:
-      datastore:
-        protocol: postgres
+      type: relational
 
   - name: payments-api
-    kind: service.http
+    kind: service
     interface:
-      http:
-        protocol: https
-        operations:
-          - method: POST
-            path: /charge
+      type: http
+      operations:
+        - method: POST
+          path: /charge
 ```
 
 ---
@@ -155,14 +152,11 @@ Each Condition represents an **independent required runtime dependency**.
 | `interface` | YES | Interface definition required for matching |
 | `name` | NO | Unique identifier within profile |
 
-IF a `name` is applied to a Condition, then the `name` MUST be unique within the profile.
 ---
 
 # 6. Core Condition Kinds
 
-The core specification defines a set of **capability classes**, referred to as
-**Kinds**, that represent common categories of externally satisfied
-runtime dependencies.
+The core specification defines a set of **capability classes**, referred to as **Kinds**, that represent common categories of externally satisfied runtime dependencies.
 
 Each Condition MUST declare exactly one `kind`.
 
@@ -173,17 +167,14 @@ The following core kinds are defined:
 - `service` — External service integrations such as APIs
 - `datastore` — Persistent data storage systems
 - `cache` — Volatile data storage optimized for fast access
-- `message_bus` — Messaging and event distribution systems
 
-These kinds are intentionally broad to allow multiple interaction models
-to exist within the same capability family.
+These kinds are intentionally broad so that multiple interaction models or implementation families can be expressed within the same capability class through the `interface` block.
 
 ---
 
 # 7. Interface Model
 
-Each Condition MUST define an `interface` block describing how the workload
-interacts with the declared capability.
+Each Condition MUST define an `interface` block describing how the workload interacts with the declared capability.
 
 The `interface` block defines:
 
@@ -198,25 +189,22 @@ interface:
   type: <interface-type>
 ```
 
-The `type` field identifies the interaction model associated with the
-declared `kind`.
+The `type` field identifies the interaction model associated with the declared `kind`.
 
-Additional fields MAY be required depending on the selected interface type.
+Additional fields MAY be defined within `interface` depending on the declared `kind` and `interface.type`.
 
 Interface definitions are validated based on:
 
 - The declared `kind`
 - The declared `interface.type`
 - Core validation rules
-- Extension validation rules (when applicable)
+- Extension validation rules, when applicable
 
 ---
 
 # 8. Core Interface Types
 
-This section describes the **structure and purpose** of core interface
-types. Allowed interface types are validated separately in the
-validation section.
+This section describes the **structure and purpose** of core interface types. The set of currently supported interface types is defined in the validation section.
 
 ---
 
@@ -235,7 +223,6 @@ Example:
 
 ```yaml
 kind: service
-
 interface:
   type: http
   operations:
@@ -244,6 +231,14 @@ interface:
       requestBodySchema: {}
       responseSchema: {}
 ```
+
+### Service Interface Fields
+
+| Field | Required | Description |
+|------|----------|-------------|
+| `type` | YES | Identifies the service interaction model |
+
+Allowed values for `interface.type` are defined in Section 9.2.
 
 ### Operation Fields
 
@@ -267,18 +262,27 @@ interface:
 
 Datastore interfaces describe persistent storage systems.
 
-Datastore interfaces identify the storage model used by the workload.
+Datastore interfaces identify the storage model used by the workload and MAY include additional matching details about the datastore engine.
 
 Example:
 
 ```yaml
 kind: datastore
-
 interface:
   type: relational
+  engine: postgres
 ```
 
-Additional optional fields MAY be defined by extensions.
+### Datastore Interface Fields
+
+| Field | Required | Description |
+|------|----------|-------------|
+| `type` | YES | Datastore interface type |
+| `engine` | NO | Specific datastore engine |
+
+If `engine` is provided, it MUST be valid for the declared datastore type.
+
+Allowed values for `interface.type` and `engine` are defined in Section 9.2.
 
 ---
 
@@ -290,32 +294,27 @@ Example:
 
 ```yaml
 kind: cache
-
 interface:
-  type: redis
+  type: key_value
+  engine: redis
 ```
 
----
+### Cache Interface Fields
 
-## 8.4 Message Bus Interface
+| Field | Required | Description |
+|------|----------|-------------|
+| `type` | YES | Cache interface type |
+| `engine` | NO | Specific caching engine |
 
-Message bus interfaces describe messaging or event systems.
+If `engine` is provided, it MUST be valid for the declared cache type.
 
-Example:
-
-```yaml
-kind: message_bus
-
-interface:
-  type: kafka
-```
+Allowed values for `interface.type` and `engine` are defined in Section 9.2.
 
 ---
 
 # 9. Core Validation Rules
 
-Validation ensures that Conditions are structurally correct and
-semantically consistent.
+Validation ensures that Conditions are structurally correct and semantically consistent.
 
 Validation occurs in multiple phases.
 
@@ -337,8 +336,6 @@ If a `name` field is provided, it MUST be unique within the profile.
 
 Each `kind` supports a defined set of valid `interface.type` values.
 
-The following interface types are valid for core kinds:
-
 ### Service
 
 Allowed interface types:
@@ -352,14 +349,14 @@ Additional validation rules:
 
 Allowed HTTP Methods:
 
-- GET  
-- HEAD  
-- POST  
-- PUT  
-- PATCH  
-- DELETE  
-- OPTIONS  
-- TRACE  
+- GET
+- HEAD
+- POST
+- PUT
+- PATCH
+- DELETE
+- OPTIONS
+- TRACE
 
 ---
 
@@ -369,6 +366,25 @@ Allowed interface types:
 
 - `relational`
 - `document`
+
+Allowed `engine` values for `type: relational`:
+
+- `postgres`
+- `mysql`
+- `mariadb`
+- `sqlserver`
+- `oracle`
+- `sqlite`
+
+Allowed `engine` values for `type: document`:
+
+- `mongodb`
+- `couchbase`
+
+Additional validation rules:
+
+- `engine` is OPTIONAL
+- If `engine` is present, it MUST be valid for the declared datastore type
 
 ---
 
@@ -381,33 +397,21 @@ Allowed interface types:
 
 ---
 
-### Message Bus
-
-Allowed interface types:
-
-- `nats`
-- `kafka`
-- `amqp`
-- `mqtt`
-
----
-
 ## 9.3 Invalid Condition Examples
 
-Invalid relational datastore example:
+Invalid datastore engine for relational type:
 
 ```yaml
 kind: datastore
-
 interface:
-  type: mongodb
+  type: relational
+  engine: mongodb
 ```
 
 Invalid interface type for cache:
 
 ```yaml
 kind: cache
-
 interface:
   type: relational
 ```
@@ -416,7 +420,6 @@ Invalid service definition:
 
 ```yaml
 kind: service
-
 interface:
   type: http
   operations: []
@@ -434,6 +437,7 @@ Extensions allow:
 - New interface types
 - New interface fields
 - Additional validation rules
+- Additional allowed values for existing fields where semantically compatible
 
 Extensions MUST NOT redefine core semantics incompatibly.
 
@@ -441,8 +445,7 @@ Extensions MUST NOT redefine core semantics incompatibly.
 
 # 11. Extension Declaration
 
-Profiles that reference extension-defined vocabulary MUST declare
-those extensions.
+Profiles that reference extension-defined vocabulary MUST identify those extensions.
 
 ```yaml
 extensions:
@@ -496,6 +499,7 @@ Extensions MAY:
 | Add Interface Type | Define new interface types |
 | Add Fields | Extend interface schema |
 | Add Rules | Add semantic validation |
+| Add Allowed Values | Extend allowed values for existing fields |
 
 ---
 
@@ -503,34 +507,60 @@ Extensions MAY:
 
 Extensions MUST:
 
-- Use namespaced identifiers
+- Use namespaced identifiers where they introduce new vocabulary
 - Preserve core semantics
 - Not redefine core kinds incompatibly
 - Not invalidate core-valid documents
+
+Extensions MAY add new allowed values for existing fields only where those values are semantically compatible with the core meaning of the declared `kind` and `interface.type`.
 
 ---
 
 # 15. Namespacing Requirements
 
-Vendor-defined elements MUST use namespaced identifiers.
+Extension-defined vocabulary MUST use namespaced identifiers to avoid collisions with core or other extension-defined elements.
 
-Examples:
+Namespacing applies to:
+
+- Extension-defined `kind` values
+- Extension-defined `interface.type` values
+- Extension-defined field names (when applicable)
+
+Namespacing typically uses a prefix that identifies the originating organization or vendor.
+
+Examples of valid namespaced identifiers:
 
 ```yaml
-aws.object_store
-aws.s3
-redis.valkey
-acme.streaming_bus
+kind: aws.object_store
+interface:
+  type: aws.s3
 ```
+
+```yaml
+kind: service
+interface:
+  type: acme.soap
+```
+
+Values defined within existing fields, such as `engine`, do not require namespacing unless necessary to prevent
+collisions.
 
 ---
 
 # 16. Unknown Extension Handling
 
-If a referenced extension cannot be resolved:
+Profiles MAY reference extension-defined vocabulary through the `extensions` declaration.
 
-- The profile MUST be marked unresolved
-- Conditions referencing unknown types MUST be invalid
+If a profile references extension-defined vocabulary that cannot be resolved through its declared extensions, the profile MUST be considered invalid.
+
+This includes cases where:
+
+- A `kind` value is not defined in the core specification or in any declared extension
+- An `interface.type` value is not defined in the core specification or in any declared extension
+- A field defined by an extension is used without the corresponding extension being declared
+- A declared extension cannot be located or resolved during validation
+
+Validation systems MUST reject Conditions that rely on unknown or unresolved extension-defined vocabulary.
 
 ---
 
@@ -563,18 +593,16 @@ extensions:
 
 conditions:
 
-  - name: primary-db
-    kind: datastore
+  - kind: datastore
     interface:
       type: relational
+      engine: postgres
 
-  - name: session-cache
-    kind: cache
+  - kind: cache
     interface:
       type: redis
 
-  - name: payments-api
-    kind: service
+  - kind: service
     interface:
       type: http
       operations:
@@ -603,30 +631,14 @@ extensions:
 
 conditions:
 
-  - name: object-storage
-    kind: aws.object_store
+  - kind: aws.object_store
     interface:
-      type: object_store
+      type: aws.s3
 ```
 
 ---
 
-# 20. Future Considerations
-
-Possible future extensions include:
-
-- GraphQL service interfaces
-- Authentication hints
-- TLS requirements
-- Data durability requirements
-- Queue/topic semantics
-- Retry and timeout expectations
-
-These are intentionally excluded from v0.1.
-
----
-
-# 21. Summary
+# 20. Summary
 
 The Runtime Conditions Profile defines:
 
@@ -634,7 +646,6 @@ The Runtime Conditions Profile defines:
 - A structured interface typing model
 - Deterministic validation behavior
 - A declarative extension mechanism
-- Vendor-neutral semantics
+- Vendor-neutral core semantics
 
-This provides a foundation for reliable downstream capability
-matching while preserving ecosystem flexibility.
+This provides a foundation for reliable downstream capability matching while preserving ecosystem flexibility.
