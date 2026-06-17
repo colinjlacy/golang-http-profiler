@@ -2,7 +2,10 @@ module github.com/colinjlacy/golang-ast-inspection/cmd/server
 
 go 1.25.0
 
-require github.com/nats-io/nats.go v1.38.0
+require (
+	github.com/colinjlacy/golang-ast-inspection v0.0.0
+	github.com/nats-io/nats.go v1.38.0
+)
 
 require (
 	github.com/klauspost/compress v1.17.11 // indirect

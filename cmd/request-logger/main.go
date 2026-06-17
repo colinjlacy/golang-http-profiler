@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	rc "github.com/colinjlacy/golang-ast-inspection/pkg/runtimeconditions"
 	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 )
@@ -16,6 +17,13 @@ const (
 	natsSubject  = "requests.received"
 	redisListKey = "requests"
 )
+
+var _ = rc.MessageBus("request-events",
+	rc.PubSub(rc.NATS),
+	rc.Subscribes(natsSubject, rc.Payload[string]()),
+)
+
+var _ = rc.Cache("request-log-cache", rc.KeyValue(rc.Redis))
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())

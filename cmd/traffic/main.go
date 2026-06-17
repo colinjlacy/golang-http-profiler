@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	rc "github.com/colinjlacy/golang-ast-inspection/pkg/runtimeconditions"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
@@ -19,6 +20,17 @@ import (
 type echoBody struct {
 	Message string `json:"message"`
 }
+
+var _ = rc.API("http-service",
+	rc.GET("/"),
+	rc.GET("/healthz"),
+	rc.POST("/echo", rc.Request[echoBody](), rc.Response[echoBody]()),
+	rc.GET("/slow"),
+)
+
+var _ = rc.Datastore("traffic-postgres", rc.Relational(rc.Postgres))
+
+var _ = rc.Cache("traffic-redis", rc.KeyValue(rc.Redis))
 
 func main() {
 	// HTTP settings

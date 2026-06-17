@@ -146,11 +146,13 @@ Each Condition represents an **independent required runtime dependency**.
 
 ## Condition Fields
 
-| Field | Required | Description |
-|------|----------|-------------|
-| `kind` | YES | Required capability classification |
-| `interface` | YES | Interface definition required for matching |
-| `name` | NO | Unique identifier within profile |
+
+| Field       | Required | Description                                |
+| ----------- | -------- | ------------------------------------------ |
+| `kind`      | YES      | Required capability classification         |
+| `interface` | YES      | Interface definition required for matching |
+| `name`      | NO       | Unique identifier within profile           |
+
 
 ---
 
@@ -234,20 +236,24 @@ interface:
 
 ### Service Interface Fields
 
-| Field | Required | Description |
-|------|----------|-------------|
-| `type` | YES | Identifies the service interaction model |
+
+| Field  | Required | Description                              |
+| ------ | -------- | ---------------------------------------- |
+| `type` | YES      | Identifies the service interaction model |
+
 
 Allowed values for `interface.type` are defined in Section 9.2.
 
 ### Operation Fields
 
-| Field | Required | Description |
-|------|----------|-------------|
-| `method` | YES | HTTP method |
-| `path` | YES | Request path |
-| `requestBodySchema` | NO | Request body schema |
-| `responseSchema` | NO | Response schema |
+
+| Field               | Required | Description         |
+| ------------------- | -------- | ------------------- |
+| `method`            | YES      | HTTP method         |
+| `path`              | YES      | Request path        |
+| `requestBodySchema` | NO       | Request body schema |
+| `responseSchema`    | NO       | Response schema     |
+
 
 ### Validation Expectations
 
@@ -275,10 +281,12 @@ interface:
 
 ### Datastore Interface Fields
 
-| Field | Required | Description |
-|------|----------|-------------|
-| `type` | YES | Datastore interface type |
-| `engine` | NO | Specific datastore engine |
+
+| Field    | Required | Description               |
+| -------- | -------- | ------------------------- |
+| `type`   | YES      | Datastore interface type  |
+| `engine` | NO       | Specific datastore engine |
+
 
 If `engine` is provided, it MUST be valid for the declared datastore type.
 
@@ -301,10 +309,12 @@ interface:
 
 ### Cache Interface Fields
 
-| Field | Required | Description |
-|------|----------|-------------|
-| `type` | YES | Cache interface type |
-| `engine` | NO | Specific caching engine |
+
+| Field    | Required | Description             |
+| -------- | -------- | ----------------------- |
+| `type`   | YES      | Cache interface type    |
+| `engine` | NO       | Specific caching engine |
+
 
 If `engine` is provided, it MUST be valid for the declared cache type.
 
@@ -493,13 +503,15 @@ spec:
 
 Extensions MAY:
 
-| Action | Description |
-|-------|-------------|
-| Add Kind | Introduce new namespaced kind |
-| Add Interface Type | Define new interface types |
-| Add Fields | Extend interface schema |
-| Add Rules | Add semantic validation |
+
+| Action             | Description                               |
+| ------------------ | ----------------------------------------- |
+| Add Kind           | Introduce new namespaced kind             |
+| Add Interface Type | Define new interface types                |
+| Add Fields         | Extend interface schema                   |
+| Add Rules          | Add semantic validation                   |
 | Add Allowed Values | Extend allowed values for existing fields |
+
 
 ---
 

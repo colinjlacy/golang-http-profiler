@@ -3,6 +3,7 @@ module github.com/colinjlacy/golang-ast-inspection/cmd/request-logger
 go 1.25.0
 
 require (
+	github.com/colinjlacy/golang-ast-inspection v0.0.0
 	github.com/nats-io/nats.go v1.38.0
 	github.com/redis/go-redis/v9 v9.7.0
 )

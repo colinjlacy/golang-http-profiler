@@ -9,8 +9,11 @@ import (
 	"strconv"
 	"time"
 
+	rc "github.com/colinjlacy/golang-ast-inspection/pkg/runtimeconditions"
 	"github.com/nats-io/nats.go"
 )
+
+const natsSubject = "requests.received"
 
 type health struct {
 	Status string `json:"status"`
@@ -30,6 +33,11 @@ type RequestInfo struct {
 }
 
 var nc *nats.Conn
+
+var _ = rc.MessageBus("request-events",
+	rc.PubSub(rc.NATS),
+	rc.Publishes(natsSubject, rc.Payload[RequestInfo]()),
+)
 
 func main() {
 	port := envAsInt("HTTP_PORT", 8080)
@@ -98,7 +106,7 @@ func withNATSPublish(next http.HandlerFunc) http.HandlerFunc {
 			}
 			data, err := json.Marshal(info)
 			if err == nil {
-				if err := nc.Publish("requests.received", data); err != nil {
+				if err := nc.Publish(natsSubject, data); err != nil {
 					log.Printf("Failed to publish to NATS: %v", err)
 				}
 			}
