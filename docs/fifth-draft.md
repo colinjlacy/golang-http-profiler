@@ -6,16 +6,16 @@
 
 This document defines the core Runtime Conditions Profile format.
 
-First-party extension drafts define common vocabulary separately:
+First-party extension drafts define common integration vocabulary separately:
 
-- `runtimeconditions.io/common-capabilities/v1alpha1`
-- `runtimeconditions.io/env-configuration/v1alpha1`
+- `https://runtimeconditions.io/extensions/common-integrations:v1alpha1`
+- `https://runtimeconditions.io/extensions/env-configuration:v1alpha1`
 
 ---
 
 # 1. Purpose
 
-A Runtime Conditions Profile declares the external runtime capabilities required by one application workload.
+A Runtime Conditions Profile declares the external runtime integrations required by one application workload.
 
 The profile describes requirements. It does not describe implementations, provisioning actions, deployment topology, credentials, secret values, or concrete target-environment values.
 
@@ -61,7 +61,63 @@ Serialized profiles are invalid if:
 
 Optional fields SHOULD be omitted when unused.
 
-## 3.1 Top-Level Fields
+## 3.1 Complete Profile Example
+
+```yaml
+apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsProfile
+
+metadata:
+  name: checkout-service
+  labels:
+    owner.example.com/team: payments
+    lifecycle.example.com/stage: production
+
+workload:
+  uri: https://github.com/example-org/checkout-service
+  version: v1.2.3
+
+extensions:
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
+
+conditions:
+  - name: primary-db
+    kind: datastore
+    interface:
+      type: relational
+      engine: postgres
+    configuration:
+      env:
+        - property: hostname
+          name: POSTGRES_HOST
+        - property: port
+          name: POSTGRES_PORT
+        - property: database
+          name: POSTGRES_DATABASE
+        - property: username
+          name: POSTGRES_USERNAME
+        - property: password
+          name: POSTGRES_PASSWORD
+          sensitive: true
+
+  - name: payments-api
+    kind: api
+    interface:
+      type: http
+      operations:
+        - method: POST
+          path: /charge
+    configuration:
+      env:
+        - property: baseUrl
+          name: PAYMENTS_API_URL
+        - property: token
+          name: PAYMENTS_API_TOKEN
+          sensitive: true
+```
+
+## 3.2 Top-Level Fields
 
 | Field | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
@@ -84,11 +140,11 @@ runtimeconditions.io/v1alpha1
 RuntimeConditionsProfile
 ```
 
-`extensions` MAY be empty.
+`extensions` MAY be empty if and only if the profile uses no extension-defined vocabulary.
 
-`conditions` MAY be empty.
+`conditions` MAY be empty if and only if the profile is intended to explicitly declare that the workload has no external runtime integration requirements.
 
-## 3.2 Metadata
+## 3.3 Metadata
 
 ```yaml
 metadata:
@@ -134,7 +190,7 @@ Labels MUST NOT define runtime dependency requirements or change the meaning of 
 
 Labels MUST NOT contain secrets, protected data, personal data, customer data, or concrete target-environment values.
 
-## 3.3 Workload
+## 3.4 Workload
 
 ```yaml
 workload:
@@ -165,7 +221,7 @@ Each Condition represents one external runtime dependency requirement.
 | ----- | ---- | -------- | ----------- |
 | `name` | string | NO | Unique Condition name within the profile |
 | `optional` | boolean | NO | Whether the Condition is optional. Defaults to `false` |
-| `kind` | string | YES | Extension-defined capability classification |
+| `kind` | string | YES | Extension-defined integration classification |
 | `interface` | object | YES | Workload-facing interface requirement |
 
 Condition shape:
@@ -214,26 +270,22 @@ Implementations MAY bundle support for first-party extensions, but generated pro
 Extension identifiers MUST have this form:
 
 ```text
-<publisher>/<extension-name>/<version>
+<uri>:<version>
 ```
 
-Extension identifiers MUST contain at least three slash-separated segments.
+The version delimiter is the final colon in the identifier. The extension URI is everything before that delimiter. The version is everything after that delimiter.
 
-The final segment MUST be a version segment.
+The extension URI MUST be an absolute HTTP or HTTPS URI.
 
-Non-version segments MUST contain only lowercase ASCII letters, digits, dots, and hyphens. They MUST start and end with a lowercase ASCII letter or digit.
+The version MUST be a non-empty string.
 
-Version segments MUST use one of these forms:
-
-- `v<major>`
-- `v<major>alpha<minor>`
-- `v<major>beta<minor>`
+This specification does not define the syntax or semantics of extension versions. Version interpretation is defined by the extension author and the Adapter.
 
 Examples:
 
-- `runtimeconditions.io/common-capabilities/v1alpha1`
-- `runtimeconditions.io/env-configuration/v1alpha1`
-- `aws.runtime/object-store/v1alpha1`
+- `https://runtimeconditions.io/extensions/common-integrations:v1alpha1`
+- `https://runtimeconditions.io/extensions/env-configuration:v1alpha1`
+- `https://extensions.example.com/runtimeconditions/aws-object-store:2026.06.0`
 
 Extension identifiers are case-sensitive.
 
@@ -241,8 +293,8 @@ Extension identifiers are case-sensitive.
 
 ```yaml
 extensions:
-  - runtimeconditions.io/common-capabilities/v1alpha1
-  - runtimeconditions.io/env-configuration/v1alpha1
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
 ```
 
 The `extensions` array MUST NOT contain duplicate extension identifiers.
@@ -275,7 +327,7 @@ apiVersion: runtimeconditions.io/v1alpha1
 kind: RuntimeConditionsExtensionDefinition
 
 metadata:
-  name: runtimeconditions.io/common-capabilities
+  uri: https://runtimeconditions.io/extensions/common-integrations
   version: v1alpha1
 
 spec:
@@ -287,13 +339,13 @@ spec:
 | `apiVersion` | string | YES | Runtime Conditions API version |
 | `kind` | string | YES | MUST be `RuntimeConditionsExtensionDefinition` |
 | `metadata` | object | YES | Extension identity |
-| `spec` | object | YES | Extension vocabulary, dependencies, and validation rules |
+| `spec` | object | YES | Extension vocabulary, dependencies, and validation schemas |
 
-`metadata.name` MUST identify the extension without its version segment.
+`metadata.uri` MUST identify the extension URI and MUST be an absolute HTTP or HTTPS URI.
 
 `metadata.version` MUST identify the extension version.
 
-`<metadata.name>/<metadata.version>` MUST be a valid extension identifier.
+`<metadata.uri>:<metadata.version>` MUST be a valid extension identifier.
 
 ## 6.2 Extension Spec Fields
 
@@ -305,9 +357,9 @@ spec:
 | `conditionFields` | array | NO | Condition-level fields defined by this extension |
 | `interfaceFields` | array | NO | Interface-level fields defined by this extension |
 | `fieldValues` | array | NO | Field values defined by this extension |
-| `validationRules` | array | NO | Semantic validation rules defined by this extension |
+| `schemas` | array | NO | JSON Schema validation schemas defined by this extension |
 
-An extension MUST define at least one vocabulary item or validation rule.
+An extension MUST define at least one vocabulary item or validation schema.
 
 Each `dependencies` item MUST be an exact extension identifier.
 
@@ -356,16 +408,21 @@ Each `fieldValues` entry MUST include:
 
 Each `fieldValues.values` entry MUST be unique within that `fieldValues` entry.
 
-Each `validationRules` entry MUST include:
+Each `schemas` entry MUST include:
 
 | Field | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
-| `id` | string | YES | Rule identifier unique within the extension |
+| `id` | string | YES | Schema identifier unique within the extension |
 | `description` | string | YES | Human-readable summary |
 | `appliesToKind` | string | NO | Condition kind scope |
 | `appliesToInterfaceType` | string | NO | Interface type scope |
+| `schema` | object | YES | JSON Schema 2020-12 schema |
 
-This specification does not define a validation rule expression language. Extension specifications MUST state validation behavior in prose with enough detail for independent implementations.
+Each `schemas[].schema` object MUST be a valid JSON Schema using the JSON Schema 2020-12 dialect.
+
+Each extension schema validates a Condition object after the profile has been converted to the JSON data model.
+
+A schema applies to a Condition when all declared scope fields match the Condition. Omitted scope fields do not restrict applicability.
 
 ## 6.4 Extension Definition Example
 
@@ -374,27 +431,56 @@ apiVersion: runtimeconditions.io/v1alpha1
 kind: RuntimeConditionsExtensionDefinition
 
 metadata:
-  name: cache.compat/valkey
+  uri: https://aws.example.com/runtimeconditions/object-store
   version: v1alpha1
 
 spec:
-  dependencies:
-    - runtimeconditions.io/common-capabilities/v1alpha1
+  kinds:
+    - name: aws.object_store
+
+  interfaceTypes:
+    - name: aws.s3
+      targetKind: aws.object_store
+
+  interfaceFields:
+    - name: bucketClass
+      targetKind: aws.object_store
+      targetType: aws.s3
 
   fieldValues:
-    - field: interface.engine
-      targetKind: cache
-      targetType: key_value
+    - field: interface.bucketClass
+      targetKind: aws.object_store
+      targetType: aws.s3
       values:
-        - valkey
+        - standard
+        - archive
 
-  validationRules:
-    - id: cache-engine-valkey
-      appliesToKind: cache
-      appliesToInterfaceType: key_value
-      description: >-
-        Permits interface.engine: valkey for cache Conditions using the
-        key_value interface type.
+  schemas:
+    - id: aws-s3-interface
+      appliesToKind: aws.object_store
+      appliesToInterfaceType: aws.s3
+      description: Validates the aws.s3 interface shape.
+      schema:
+        $schema: https://json-schema.org/draft/2020-12/schema
+        type: object
+        required:
+          - kind
+          - interface
+        properties:
+          kind:
+            const: aws.object_store
+          interface:
+            type: object
+            required:
+              - type
+            properties:
+              type:
+                const: aws.s3
+              bucketClass:
+                enum:
+                  - standard
+                  - archive
+            additionalProperties: true
 ```
 
 ---
@@ -408,7 +494,7 @@ Extensions MAY define:
 - New Condition fields
 - New interface fields
 - New field values
-- Semantic validation rules
+- JSON Schema validation schemas
 
 Extensions MUST NOT:
 
@@ -451,7 +537,9 @@ A profile is invalid if the resolved extension set contains more than one defini
 
 Two definitions conflict even when they are identical.
 
-An extension that uses vocabulary defined by another extension MUST declare a dependency on that extension. It MUST NOT redefine that vocabulary.
+An extension that uses vocabulary defined by another extension MUST declare a dependency on that extension. It MUST NOT redefine that vocabulary in the same definition scope.
+
+An extension MAY define vocabulary with overlapping purpose when it uses a distinct name or definition scope.
 
 ## 7.2 Namespacing
 
@@ -491,7 +579,7 @@ Validation occurs in this order:
 2. Extension declaration resolution
 3. Extension dependency resolution
 4. Vocabulary definition and conflict validation
-5. Extension semantic validation
+5. Extension JSON Schema validation
 
 ## 8.1 Structural Validation
 
@@ -533,6 +621,7 @@ A profile is invalid if:
 - Any resolved extension dependency is missing
 - Resolved extensions contain a dependency cycle
 - Resolved extensions contain a vocabulary definition conflict
+- Any applicable extension JSON Schema validation fails
 
 ## 8.3 Validity Levels
 
@@ -542,7 +631,7 @@ Validators SHOULD distinguish:
 | ----- | ----------- |
 | **Structural validity** | The document satisfies the core shape and type rules |
 | **Extension-resolved validity** | All extensions resolve and all vocabulary has exactly one definition in scope |
-| **Semantic validity** | The profile satisfies all core and extension-defined semantic rules |
+| **Semantic validity** | The profile satisfies all applicable extension JSON Schema validations |
 
 A core-only profile with an empty `conditions` array can be structurally valid.
 
@@ -579,7 +668,7 @@ A conforming profile MUST:
 - Declare all extensions required to interpret its vocabulary
 - Avoid unresolved vocabulary
 - Avoid vocabulary definition conflicts
-- Satisfy all semantic validation rules for resolved extensions
+- Satisfy all semantic validation schemas for resolved extensions
 - Avoid secret values and concrete target-environment values
 
 ## 9.2 Extension Conformance
@@ -592,7 +681,7 @@ A conforming extension MUST:
 - Declare exact-version dependencies on vocabulary defined by other extensions
 - Avoid redefining vocabulary defined by another resolved extension
 - Respect core field placement and reserved-name rules
-- State validation behavior clearly enough for independent implementations
+- Express semantic validation with JSON Schema 2020-12 schemas
 
 ## 9.3 Generator Conformance
 
@@ -606,15 +695,19 @@ A conforming generator SHOULD fail before emitting a profile with unresolved voc
 
 A conforming validator MUST implement the validation layers in Section 8.
 
-A conforming validator MUST reject structurally invalid profiles, unresolved extensions, dependency cycles, vocabulary conflicts, unresolved vocabulary, and semantic validation failures.
+A conforming validator MUST reject structurally invalid profiles, unresolved extensions, dependency cycles, vocabulary conflicts, unresolved vocabulary, and JSON Schema validation failures.
 
-## 9.5 Resolver Conformance
+## 9.5 Adapter Conformance
 
-A resolver interprets a valid Runtime Conditions Profile for a target platform, catalog, policy system, or deployment workflow.
+An Adapter consumes a Runtime Conditions Profile for a target platform, catalog, policy system, or deployment workflow.
 
-A conforming resolver MUST NOT treat a structurally valid but extension-unresolved profile as semantically valid.
+A conforming Adapter MUST locate declared extension definitions and transitive extension dependencies before interpreting extension-defined vocabulary.
 
-A conforming resolver MUST preserve the distinction between profile requirements and target-environment fulfillment choices.
+A conforming Adapter MUST NOT treat a structurally valid but extension-unresolved profile as semantically valid.
+
+A conforming Adapter MUST preserve the distinction between profile requirements and target-environment fulfillment choices.
+
+A conforming Adapter MAY map valid Conditions to platform resources, services, policies, configuration inputs, or deployment workflow steps. Such mappings are outside the profile data model.
 
 ---
 
@@ -680,7 +773,7 @@ workload:
   version: v1.2.3
 
 extensions:
-  - runtimeconditions.io/common-capabilities/v1alpha1
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
 
 conditions:
   - name: primary-db
@@ -714,8 +807,8 @@ workload:
   version: v1.2.3
 
 extensions:
-  - runtimeconditions.io/common-capabilities/v1alpha1
-  - runtimeconditions.io/env-configuration/v1alpha1
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
 
 conditions:
   - name: primary-db
