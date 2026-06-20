@@ -6,7 +6,8 @@ This repository contains three separate implementation areas:
 - `go/` - Go declaration library, Go AST profiler, and Go sample services.
 - `python/` - Python declaration library, Python AST profiler, and Python sample services.
 
-The Runtime Conditions Profile specification draft lives in `docs/`.
+The Runtime Conditions Profile specification draft lives in `docs/`. Start with
+`docs/intro.md` for the core spec, extension drafts, and SDK integration guides.
 
 ## eBPF Profiler
 

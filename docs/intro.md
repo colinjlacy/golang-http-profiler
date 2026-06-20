@@ -15,7 +15,10 @@ Read the documents in this order:
 1. [Core Runtime Conditions Profile draft](fifth-draft.md)
 2. [Common Integrations extension](../extensions/common-integrations/README.md)
 3. [Environment Configuration extension](../extensions/env-configuration/README.md)
-4. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
+4. [SDK integration guide](guides/sdk-integration-guide.md)
+5. [Package artifact conventions](guides/package-artifact-conventions.md)
+6. [Generator discovery and end-user workflow](guides/generator-discovery-workflow.md)
+7. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
 
 The core draft should be reviewed as the specification kernel. It defines:
 
@@ -31,6 +34,8 @@ The core draft should be reviewed as the specification kernel. It defines:
 - Conformance expectations for profiles, extensions, generators, validators, and adapters
 
 The first-party extensions should be reviewed as standard vocabulary that can be bundled by implementations while still remaining outside the core specification.
+
+The SDK integration guides should be reviewed as non-normative implementation guidance. They describe how SDK authors can package Runtime Conditions metadata so generators can discover Conditions from normal application imports.
 
 The implementation proposal should be reviewed as a non-normative feasibility exercise. It demonstrates how generated Runtime Conditions Profiles can be used by a platform workflow, but it is not intended to define the specification itself.
 
@@ -109,6 +114,7 @@ Examples and implementation documents should show how the core and extensions wo
 - A structurally valid core-only profile
 - A profile using common integrations
 - A profile using common integrations plus environment configuration
+- An SDK package that ships a `runtimeconditions.package.yaml` manifest and an extension definition
 - A generated profile produced from application code
 - A platform workflow that validates the profile, ensures required integrations exist, and injects workload configuration inputs before deployment
 
