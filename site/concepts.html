@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Core Concepts | Runtime Conditions</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
+        <nav class="top-links" aria-label="Top links">
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/docs/fifth-draft.md">Current Draft</a>
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">Run Demo</a>
+          <a href="reference.html">Source Map</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="guide-layout">
+      <aside class="sidebar" aria-label="Guide chapters">
+        <p class="sidebar-title">Reader Guide</p>
+        <ol class="chapter-list">
+          <li><a href="index.html"><span class="num">00</span><span>Start here</span></a></li>
+          <li><a aria-current="page" href="concepts.html"><span class="num">01</span><span>Core concepts</span></a></li>
+          <li><a href="spec.html"><span class="num">02</span><span>Profile shape</span></a></li>
+          <li><a href="developers.html"><span class="num">03</span><span>Code to profile</span></a></li>
+          <li><a href="extensions.html"><span class="num">04</span><span>Extensions</span></a></li>
+          <li><a href="platform.html"><span class="num">05</span><span>Adapters</span></a></li>
+          <li><a href="demo.html"><span class="num">06</span><span>Run the demo</span></a></li>
+          <li><a href="reference.html"><span class="num">07</span><span>Reference</span></a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <p class="chapter-label">Chapter 1</p>
+        <h1 class="page-title">Profiles describe demand. Platforms decide fulfillment.</h1>
+        <p class="intro">
+          The profile is the portable contract between application intent and platform automation.
+        </p>
+
+        <section class="section">
+          <h2>Demand in a complete profile</h2>
+          <div class="example">
+            <div class="example-title">Full profile shape with one cache Condition</div>
+            <pre><code>apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsProfile
+
+metadata:
+  name: request-logger-http
+
+workload:
+  uri: github.com/example/request-logger-http
+  version: v0.1.0
+
+extensions:
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
+
+conditions:
+  - name: request-cache
+    kind: cache
+    interface:
+      type: key_value
+      engine: redis
+    configuration:
+      alternatives:
+        - env:
+            - property: url
+              name: REDIS_URL
+        - env:
+            - property: hostname
+              name: REDIS_HOST
+            - property: port
+              name: REDIS_PORT</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Fulfillment outside the profile</h2>
+          <p class="short">
+            The previous profile only says the workload needs a Redis-compatible cache and can consume it through <code>REDIS_URL</code> or <code>REDIS_HOST</code> plus <code>REDIS_PORT</code>. Before Kubernetes can inject <code>REDIS_URL</code>, an adapter has to satisfy that Condition by provisioning Redis or granting access to an existing Redis cache.
+          </p>
+          <ol class="step-list" aria-label="Redis fulfillment steps">
+            <li>
+              <span class="step-num">1</span>
+              <div>
+                <strong>Profile</strong>
+                <span>Declares <code>kind: cache</code>, <code>engine: redis</code>, and acceptable env vars.</span>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">2</span>
+              <div>
+                <strong>Adapter</strong>
+                <span>Chooses how this platform can satisfy the cache Condition.</span>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">3</span>
+              <div>
+                <strong>Provider</strong>
+                <span>Creates Redis or grants access to an existing Redis instance.</span>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">4</span>
+              <div>
+                <strong>Connection Output</strong>
+                <span>Publishes <code>url</code>, <code>hostname</code>, and <code>port</code> through platform artifacts.</span>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">5</span>
+              <div>
+                <strong>Deployment</strong>
+                <span>Receives the env var names declared by the workload profile.</span>
+              </div>
+            </li>
+          </ol>
+          <p class="short">
+            In the Kratix demo, the Redis Promise is the provider interface. It publishes a concrete connection ConfigMap. The adapter then binds the profile's <code>REDIS_URL</code> request to that ConfigMap in the generated Deployment.
+          </p>
+          <div class="example">
+            <div class="example-title">Provider output used by the adapter</div>
+            <pre><code>apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: request-logger-cache-connection
+  namespace: demo
+data:
+  url: redis://request-logger-cache.demo.svc.cluster.local:6379
+  hostname: request-logger-cache.demo.svc.cluster.local
+  port: "6379"</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">Final Deployment env generated by the adapter</div>
+            <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: request-logger-http
+  namespace: demo
+spec:
+  # ...
+  template:
+    spec:
+      containers:
+        - name: request-logger-http
+          # ...
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: request-logger-cache-connection
+                  key: url</code></pre>
+          </div>
+          <p class="short">
+            This snippet belongs in the generated Kubernetes Deployment. It is not part of the Runtime Conditions Profile. It is the result of the adapter satisfying the profile against a concrete platform.
+          </p>
+        </section>
+
+        <section class="section">
+          <h2>Vocabulary</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Term</th><th>Meaning</th><th>Demo Example</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Profile</td><td>One workload's runtime integration requirements.</td><td>`request-logger-http` generated profile</td></tr>
+                <tr><td>Condition</td><td>One required external integration.</td><td>`todos-api`, `request-cache`, `s3-object-store`</td></tr>
+                <tr><td>Extension</td><td>Vocabulary and validation outside the core spec.</td><td>Common Integrations, Env Configuration, AWS Object Store</td></tr>
+                <tr><td>Generator</td><td>Reads code and emits a profile.</td><td>Go AST generator</td></tr>
+                <tr><td>Adapter</td><td>Maps valid profiles to platform-specific requests.</td><td>Kratix `RuntimeWorkload` Promise</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>What never belongs in the profile</h2>
+          <ul class="horizontal-list">
+            <li class="mini-card"><strong>Secret values</strong><span>Access keys, tokens, passwords, and private material stay out.</span></li>
+            <li class="mini-card"><strong>Target choices</strong><span>Bucket names, service names, cloud accounts, and cluster topology stay out.</span></li>
+            <li class="mini-card"><strong>Provisioning instructions</strong><span>The profile declares requirements. Adapters and platforms provision or bind resources.</span></li>
+          </ul>
+        </section>
+
+        <nav class="page-nav" aria-label="Page navigation">
+          <a href="index.html">Previous: Start here</a>
+          <a href="spec.html">Next: Profile shape</a>
+        </nav>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Chapter 1 of 7</span>
+        <a href="spec.html">Continue</a>
+      </div>
+    </footer>
+    <script src="assets/syntax.js" defer></script>
+  </body>
+</html>

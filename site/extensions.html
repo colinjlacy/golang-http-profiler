@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Extensions | Runtime Conditions</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
+        <nav class="top-links" aria-label="Top links">
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/docs/fifth-draft.md">Current Draft</a>
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">Run Demo</a>
+          <a href="reference.html">Source Map</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="guide-layout">
+      <aside class="sidebar" aria-label="Guide chapters">
+        <p class="sidebar-title">Reader Guide</p>
+        <ol class="chapter-list">
+          <li><a href="index.html"><span class="num">00</span><span>Start here</span></a></li>
+          <li><a href="concepts.html"><span class="num">01</span><span>Core concepts</span></a></li>
+          <li><a href="spec.html"><span class="num">02</span><span>Profile shape</span></a></li>
+          <li><a href="developers.html"><span class="num">03</span><span>Code to profile</span></a></li>
+          <li><a aria-current="page" href="extensions.html"><span class="num">04</span><span>Extensions</span></a></li>
+          <li><a href="platform.html"><span class="num">05</span><span>Adapters</span></a></li>
+          <li><a href="demo.html"><span class="num">06</span><span>Run the demo</span></a></li>
+          <li><a href="reference.html"><span class="num">07</span><span>Reference</span></a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <p class="chapter-label">Chapter 4</p>
+        <h1 class="page-title">Extensions add vocabulary and validation to the core.</h1>
+        <p class="intro">
+          The core profile shape is intentionally small. Extensions define the concrete words that make a profile useful: kinds, interface types, fields, field values, and JSON Schema validation.
+        </p>
+
+        <section class="section">
+          <h2>What an extension owns</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Extension Part</th><th>What It Does</th><th>Example</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>`kinds`</td><td>Defines Condition categories.</td><td>`api`, `datastore`, `cache`</td></tr>
+                <tr><td>`interfaceTypes`</td><td>Defines valid interface types for a kind.</td><td>`http` for `api`, `key_value` for `cache`</td></tr>
+                <tr><td>`interfaceFields`</td><td>Defines extension-owned fields inside `interface`.</td><td>`interface.engine`, `interface.operations`</td></tr>
+                <tr><td>`fieldValues`</td><td>Defines allowed values for extension-owned fields.</td><td>`redis`, `memcached`, `GET`, `POST`</td></tr>
+                <tr><td>`schemas`</td><td>Defines machine-readable validation.</td><td>JSON Schema for HTTP API Conditions</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>First-party extension: Common Integrations</h2>
+          <p class="short">
+            The Common Integrations extension defines standard integration vocabulary for APIs, datastores, and caches. Profiles that use `kind: cache` or `interface.type: http` depend on this extension.
+          </p>
+          <div class="example">
+            <div class="example-title">
+              <span>extensions/common-integrations/common-integrations-v1alpha1.yaml</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/extensions/common-integrations/common-integrations-v1alpha1.yaml">source</a>
+            </div>
+            <pre><code>metadata:
+  uri: https://runtimeconditions.io/extensions/common-integrations
+  version: v1alpha1
+
+spec:
+  kinds:
+    - name: api
+    - name: datastore
+    - name: cache
+
+  interfaceTypes:
+    - name: http
+      targetKind: api
+    - name: key_value
+      targetKind: cache</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Field values make vocabulary deterministic</h2>
+          <p class="short">
+            The extension does not merely say an engine field may exist. It also owns the shared values that validators and adapters can rely on.
+          </p>
+          <div class="example">
+            <div class="example-title">Cache engine values</div>
+            <pre><code>fieldValues:
+  - field: interface.engine
+    targetKind: cache
+    targetType: key_value
+    values:
+      - redis
+      - memcached</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">HTTP method values</div>
+            <pre><code>fieldValues:
+  - field: interface.operations[].method
+    targetKind: api
+    targetType: http
+    values:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+      - TRACE</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Extensions define JSON Schema validation</h2>
+          <p class="short">
+            Schema rules make extension validation portable. The validator can evaluate the profile without interpreting prose.
+          </p>
+          <div class="example">
+            <div class="example-title">HTTP API schema excerpt</div>
+            <pre><code>schemas:
+  - id: api-http-interface
+    appliesToKind: api
+    appliesToInterfaceType: http
+    description: Validates HTTP API integration conditions.
+    schema:
+      type: object
+      required:
+        - kind
+        - interface
+      properties:
+        kind:
+          const: api
+        interface:
+          type: object
+          required:
+            - type
+          properties:
+            type:
+              const: http
+            operations:
+              type: array
+              items:
+                required:
+                  - method
+                  - path</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>First-party extension: Environment Configuration</h2>
+          <p class="short">
+            The Environment Configuration extension adds the `configuration` field. It lets a profile say which workload-facing inputs are expected without embedding the values.
+          </p>
+          <div class="example">
+            <div class="example-title">
+              <span>extensions/env-configuration/env-configuration-v1alpha1.yaml</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/extensions/env-configuration/env-configuration-v1alpha1.yaml">source</a>
+            </div>
+            <pre><code>spec:
+  dependencies:
+    - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+
+  conditionFields:
+    - name: configuration
+      appliesToAllKinds: true
+
+  fieldValues:
+    - field: configuration.env[].property
+      targetKind: cache
+      targetType: key_value
+      values:
+        - url
+        - hostname
+        - port
+        - username
+        - password
+        - token</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>How a profile uses extensions</h2>
+          <p class="short">
+            The profile declares every extension required to interpret its vocabulary. Transitive dependencies are resolved by validators and tooling, but generated profiles should still declare the vocabulary they directly use.
+          </p>
+          <div class="example">
+            <div class="example-title">Profile declaration and extension-owned fields</div>
+            <pre><code>extensions:
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
+
+conditions:
+  - name: request-cache
+    kind: cache              # common-integrations
+    interface:
+      type: key_value        # common-integrations
+      engine: redis          # common-integrations field value
+    configuration:           # env-configuration
+      alternatives:
+        - env:
+            - property: url  # env-configuration field value
+              name: REDIS_URL</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Third-party extensions follow the same rules</h2>
+          <p class="short">
+            The AWS Object Store extension is treated as a third-party example. It defines `aws.object_store`, `aws.s3`, S3-specific fields, and depends on first-party configuration vocabulary.
+          </p>
+          <div class="example">
+            <div class="example-title">
+              <span>extensions/aws-object-store/aws-object-store-v1alpha1.yaml</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/extensions/aws-object-store/aws-object-store-v1alpha1.yaml">source</a>
+            </div>
+            <pre><code>metadata:
+  uri: https://aws.example.com/runtimeconditions/object-store
+  version: v1alpha1
+
+spec:
+  dependencies:
+    - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+    - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
+
+  kinds:
+    - name: aws.object_store
+
+  interfaceTypes:
+    - name: aws.s3
+      targetKind: aws.object_store</code></pre>
+          </div>
+        </section>
+
+        <nav class="page-nav" aria-label="Page navigation">
+          <a href="developers.html">Previous: Code to profile</a>
+          <a href="platform.html">Next: Adapters</a>
+        </nav>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Chapter 4 of 7</span>
+        <a href="platform.html">Continue</a>
+      </div>
+    </footer>
+    <script src="assets/syntax.js" defer></script>
+  </body>
+</html>

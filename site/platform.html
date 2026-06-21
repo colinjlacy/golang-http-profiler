@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Adapters | Runtime Conditions</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
+        <nav class="top-links" aria-label="Top links">
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/docs/fifth-draft.md">Current Draft</a>
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">Run Demo</a>
+          <a href="reference.html">Source Map</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="guide-layout">
+      <aside class="sidebar" aria-label="Guide chapters">
+        <p class="sidebar-title">Reader Guide</p>
+        <ol class="chapter-list">
+          <li><a href="index.html"><span class="num">00</span><span>Start here</span></a></li>
+          <li><a href="concepts.html"><span class="num">01</span><span>Core concepts</span></a></li>
+          <li><a href="spec.html"><span class="num">02</span><span>Profile shape</span></a></li>
+          <li><a href="developers.html"><span class="num">03</span><span>Code to profile</span></a></li>
+          <li><a href="extensions.html"><span class="num">04</span><span>Extensions</span></a></li>
+          <li><a aria-current="page" href="platform.html"><span class="num">05</span><span>Adapters</span></a></li>
+          <li><a href="demo.html"><span class="num">06</span><span>Run the demo</span></a></li>
+          <li><a href="reference.html"><span class="num">07</span><span>Reference</span></a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <p class="chapter-label">Chapter 5</p>
+        <h1 class="page-title">Adapters are where profile demand becomes platform action.</h1>
+        <p class="intro">
+          A valid profile is still just a requirements document. The adapter is the platform-specific component that decides how those requirements are satisfied and wired into the workload.
+        </p>
+
+        <section class="section">
+          <h2>Adapter responsibility</h2>
+          <ol class="step-list">
+            <li><span class="step-num">1</span><div><strong>Read a valid profile.</strong><span>The adapter starts from Conditions and their declared `configuration.env` inputs.</span></div></li>
+            <li><span class="step-num">2</span><div><strong>Validate against platform context.</strong><span>In the demo, API Conditions are checked against a catalog OpenAPI document.</span></div></li>
+            <li><span class="step-num">3</span><div><strong>Invoke provider interfaces.</strong><span>For Redis, S3, and Cilium, the adapter calls the corresponding Promise interface with resolved inputs.</span></div></li>
+            <li><span class="step-num">4</span><div><strong>Bind provider outputs.</strong><span>The adapter maps profile env names to ConfigMaps, Secrets, literal URLs, and policy outputs.</span></div></li>
+            <li><span class="step-num">5</span><div><strong>Render workload deployment.</strong><span>The final Deployment contains target-specific references, but the profile remains target-neutral.</span></div></li>
+          </ol>
+        </section>
+
+        <section class="section">
+          <h2>Adapter input: a profile Condition</h2>
+          <p class="short">
+            The adapter is not guessing from the application source. It receives the generated profile and interprets Conditions that have already passed validation.
+          </p>
+          <div class="example">
+            <div class="example-title">Cache Condition from the profile</div>
+            <pre><code>- name: request-cache
+  kind: cache
+  interface:
+    type: key_value
+    engine: redis
+  configuration:
+    alternatives:
+      - env:
+          - property: url
+            name: REDIS_URL
+      - env:
+          - property: hostname
+            name: REDIS_HOST
+          - property: port
+            name: REDIS_PORT</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Adapter step: choose provider outputs for profile properties</h2>
+          <p class="short">
+            The Redis Promise owns Redis provisioning and publishes connection outputs. The adapter only knows how to satisfy profile properties from those outputs.
+          </p>
+          <div class="example">
+            <div class="example-title">
+              <span>platform/kratix/promises/runtime-workload/pipeline/resolver.py</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/kratix/promises/runtime-workload/pipeline/resolver.py">source</a>
+            </div>
+            <pre><code>redis_env = env_from_configuration(
+  condition,
+  {
+    "url": config_map_value(f"{redis_name}-connection", "url"),
+    "hostname": config_map_value(f"{redis_name}-connection", "hostname"),
+    "port": config_map_value(f"{redis_name}-connection", "port"),
+  },
+)
+env.extend(redis_env)</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Adapter step: validate API compatibility before deployment</h2>
+          <p class="short">
+            The API Condition declares `GET /todos/{id}` and an expected response shape. The adapter compares that requirement with the catalog OpenAPI document before creating the workload.
+          </p>
+          <div class="example">
+            <div class="example-title">API validation path</div>
+            <pre><code>for condition in conditions:
+  if condition.get("kind") != "api":
+    continue
+
+  api = validate_api_condition(condition, apis)
+  base_url = api.base_url or f"http://{api.name}.{namespace}.svc.cluster.local:{port}"
+
+  api_env = env_from_configuration(
+    condition,
+    {
+      "url": literal_value(base_url),
+      "baseUrl": literal_value(base_url),
+    },
+  )</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Adapter step: call platform interfaces, not invent a second profile</h2>
+          <p class="short">
+            The adapter should trigger existing provider interfaces directly. In this demo those interfaces are Kratix Promises. The important boundary is that the adapter is not creating another Runtime Conditions document between itself and the Promise.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Profile Requirement</th><th>Adapter Calls</th><th>Provider Owns</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>`kind: cache`, `engine: redis`</td><td>Redis Promise interface</td><td>Redis Deployment, Service, connection ConfigMap, Redis network policy</td></tr>
+                <tr><td>`kind: api`, `interface.type: http`</td><td>CiliumAPIAccess Promise interface after catalog validation</td><td>Cilium policy for declared HTTP methods and paths</td></tr>
+                <tr><td>`kind: aws.object_store`, `interface.type: aws.s3`</td><td>S3Bucket Promise interface</td><td>AWS bucket, IAM credentials, connection ConfigMap, credential Secret, S3 egress policy</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Provider output: S3 Promise artifacts</h2>
+          <p class="short">
+            The S3 Promise handles AWS. It reads platform-owned admin credentials, creates the real bucket and IAM credentials, then publishes workload-safe Kubernetes outputs.
+          </p>
+          <div class="example">
+            <div class="example-title">
+              <span>platform/kratix/promises/s3-bucket/pipeline/configure.py</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/kratix/promises/s3-bucket/pipeline/configure.py">source</a>
+            </div>
+            <pre><code>connection_config = {
+  "kind": "ConfigMap",
+  "metadata": {"name": f"{name}-connection", "namespace": namespace},
+  "data": {
+    "bucket": bucket,
+    "region": region,
+  },
+}
+
+credentials = {
+  "kind": "Secret",
+  "metadata": {"name": f"{name}-credentials", "namespace": namespace},
+  "data": {
+    "accessKeyId": b64(aws["accessKeyId"]),
+    "secretAccessKey": b64(aws["secretAccessKey"]),
+  },
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Final workload binding</h2>
+          <p class="short">
+            This is where the profile's environment variable names meet platform-provided values. The application still reads the same env vars it declared in source.
+          </p>
+          <div class="example">
+            <div class="example-title">Rendered Deployment env entries</div>
+            <pre><code>env:
+  - name: TODOS_API_URL
+    value: http://todos-api.demo.svc.cluster.local:8080
+
+  - name: REDIS_URL
+    valueFrom:
+      configMapKeyRef:
+        name: request-logger-cache-connection
+        key: url
+
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: request-logger-object-store-credentials
+        key: secretAccessKey</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Boundary summary</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Component</th><th>Owns</th><th>Does Not Own</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Generator</td><td>Source-to-profile extraction.</td><td>Provisioning, deployment, target values.</td></tr>
+                <tr><td>Adapter</td><td>Profile interpretation for one platform.</td><td>Extension vocabulary or provider internals.</td></tr>
+                <tr><td>Promise</td><td>Concrete provider implementation.</td><td>Application source analysis or profile generation.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <nav class="page-nav" aria-label="Page navigation">
+          <a href="extensions.html">Previous: Extensions</a>
+          <a href="demo.html">Next: Run the demo</a>
+        </nav>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Chapter 5 of 7</span>
+        <a href="demo.html">Continue</a>
+      </div>
+    </footer>
+    <script src="assets/syntax.js" defer></script>
+  </body>
+</html>

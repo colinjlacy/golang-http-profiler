@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Run The Demo | Runtime Conditions</title>
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
+        <nav class="top-links" aria-label="Top links">
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/docs/fifth-draft.md">Current Draft</a>
+          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">Run Demo</a>
+          <a href="reference.html">Source Map</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="guide-layout">
+      <aside class="sidebar" aria-label="Guide chapters">
+        <p class="sidebar-title">Reader Guide</p>
+        <ol class="chapter-list">
+          <li><a href="index.html"><span class="num">00</span><span>Start here</span></a></li>
+          <li><a href="concepts.html"><span class="num">01</span><span>Core concepts</span></a></li>
+          <li><a href="spec.html"><span class="num">02</span><span>Profile shape</span></a></li>
+          <li><a href="developers.html"><span class="num">03</span><span>Code to profile</span></a></li>
+          <li><a href="extensions.html"><span class="num">04</span><span>Extensions</span></a></li>
+          <li><a href="platform.html"><span class="num">05</span><span>Adapters</span></a></li>
+          <li><a aria-current="page" href="demo.html"><span class="num">06</span><span>Run the demo</span></a></li>
+          <li><a href="reference.html"><span class="num">07</span><span>Reference</span></a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <p class="chapter-label">Chapter 6</p>
+        <h1 class="page-title">The repo includes a complete working demo.</h1>
+        <p class="intro">
+          The demo installs Kratix Promises, generates a profile from Go source, validates an API contract, provisions Redis and S3, and deploys the workload with Cilium policies.
+        </p>
+
+        <section class="section">
+          <h2>Prerequisite AWS admin Secret</h2>
+          <div class="example">
+            <div class="example-title">
+              <span>Needed before S3 provisioning</span>
+              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">platform README</a>
+            </div>
+            <pre><code>kubectl -n kratix-platform-system create secret generic aws-admin-credentials \
+  --from-literal=ACCESS_KEY_ID=&lt;aws-access-key-id&gt; \
+  --from-literal=SECRET_ACCESS_KEY=&lt;aws-secret-access-key&gt;</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Run path</h2>
+          <div class="example">
+            <div class="example-title">From the repository root</div>
+            <pre><code>platform/scripts/00-check-prereqs.sh
+platform/scripts/01-install-kratix.sh
+platform/scripts/02-use-ghcr-images.sh
+platform/scripts/03-install-promises.sh
+platform/scripts/04-deploy-catalog-and-provider.sh
+platform/scripts/05-rc-deploy.sh
+platform/scripts/06-smoke-test.sh</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>What should happen</h2>
+          <ol class="step-list">
+            <li><span class="step-num">1</span><div><strong>Generator emits profile</strong><span>API, Redis, and S3 Conditions are discovered from source and SDK metadata.</span></div></li>
+            <li><span class="step-num">2</span><div><strong>Adapter validates API</strong><span>The declared `GET /todos/{id}` operation is checked against the catalog OpenAPI document.</span></div></li>
+            <li><span class="step-num">3</span><div><strong>Promises fulfill dependencies</strong><span>Redis runs in-cluster; S3Bucket creates real AWS S3 and IAM credentials.</span></div></li>
+            <li><span class="step-num">4</span><div><strong>Workload receives env and policy</strong><span>Deployment env refs and Cilium policies are rendered from provider outputs.</span></div></li>
+          </ol>
+        </section>
+
+        <section class="section">
+          <h2>Breaking contract check</h2>
+          <div class="example">
+            <div class="example-title">The adapter should fail before writing the Deployment</div>
+            <pre><code>platform/scripts/07-demo-breaking-change.sh</code></pre>
+          </div>
+        </section>
+
+        <nav class="page-nav" aria-label="Page navigation">
+          <a href="platform.html">Previous: Adapters</a>
+          <a href="reference.html">Next: Reference</a>
+        </nav>
+      </main>
+    </div>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Chapter 6 of 7</span>
+        <a href="reference.html">Continue</a>
+      </div>
+    </footer>
+    <script src="assets/syntax.js" defer></script>
+  </body>
+</html>
