@@ -22,7 +22,7 @@ def main() -> int:
     metadata = request.get("metadata", {})
     spec = request.get("spec", {})
     name = metadata["name"]
-    namespace = metadata.get("namespace", "default")
+    namespace = spec.get("targetNamespace") or metadata.get("namespace", "default")
     size = spec.get("size", "small")
     consumers = spec.get("consumers") or []
 

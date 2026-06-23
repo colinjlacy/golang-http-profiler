@@ -20,7 +20,7 @@ spec:
       containers:
         - name: todos-api
           image: __TODOS_API_IMAGE__
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: __TODOS_API_PORT__
@@ -48,4 +48,3 @@ spec:
     - name: http
       port: __TODOS_API_PORT__
       targetPort: http
-

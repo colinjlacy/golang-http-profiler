@@ -29,7 +29,11 @@ spec:
               properties:
                 spec:
                   type: object
+                  required:
+                    - targetNamespace
                   properties:
+                    targetNamespace:
+                      type: string
                     bucketName:
                       type: string
                     region:
@@ -67,6 +71,7 @@ spec:
             containers:
               - name: configure
                 image: __S3_BUCKET_PIPELINE_IMAGE__
+                imagePullPolicy: Always
                 env:
                   - name: AWS_ADMIN_ACCESS_KEY_ID
                     valueFrom:

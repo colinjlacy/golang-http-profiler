@@ -45,11 +45,13 @@ spec:
                   required:
                     - image
                     - profile
+                    - targetNamespace
                   properties:
                     image:
                       type: string
                     imagePullPolicy:
                       type: string
+                      default: Always
                     port:
                       type: integer
                       default: 8080
@@ -59,6 +61,8 @@ spec:
                     readinessPath:
                       type: string
                       default: /ready
+                    targetNamespace:
+                      type: string
                     profile:
                       type: string
                     catalog:
@@ -91,3 +95,4 @@ spec:
             containers:
               - name: resolver
                 image: __APPLICATION_RELEASE_PIPELINE_IMAGE__
+                imagePullPolicy: Always

@@ -40,6 +40,10 @@ platform/scripts/06-smoke-test.sh
 
 The GHCR script writes image references to `platform/.env.generated`. Later scripts source that file automatically.
 
+Rendered Kubernetes manifests are written to `platform/.build`. For example, `03-install-promises.sh` renders the Promise templates into `platform/.build/*-promise.yaml` and applies those generated files with `kubectl apply -f`.
+
+Demo images use `imagePullPolicy: Always` so reruns pull newly published pipeline, provider, and workload images instead of using cached tags.
+
 The default image tag is `latest`, matching the tag produced by the GitHub Actions workflow on the default branch:
 
 ```sh
@@ -103,6 +107,7 @@ That script swaps the catalog to an incompatible OpenAPI document and submits a 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DEMO_NAMESPACE` | `demo` | Namespace for provider and consumer workloads |
+| `CONTROL_NAMESPACE` | `demoteam-system` | Namespace for Kratix resource requests and workflow Jobs |
 | `CATALOG_NAMESPACE` | `runtimeconditions-system` | Namespace for the API catalog ConfigMap |
 | `IMAGE_REGISTRY` | empty | Registry prefix for durable images |
 | `IMAGE_TAG` | `latest` for GHCR, `dev` or `24h` for local build script | Image tag |
@@ -123,9 +128,11 @@ That script swaps the catalog to an incompatible OpenAPI document and submits a 
 - `platform.demoteam.dev/v1alpha1, Kind=ApplicationRelease` Promise
 - Backstage-compatible API catalog ConfigMap for `todos-api`
 - In-cluster `todos-api` provider Deployment and Service
-- An `ApplicationRelease` request generated from source-derived Runtime Conditions
+- An `ApplicationRelease` request in `CONTROL_NAMESPACE` generated from source-derived Runtime Conditions
 
 The `platform.demoteam.dev` API group is a fake platform-team namespace for the demo's Kratix APIs. It is deliberately separate from the Runtime Conditions Profile API so provider Promises can exist independently of the profile specification.
+
+Kratix resource workflow Jobs run in the same namespace as their resource requests. The demo therefore keeps `ApplicationRelease`, Redis, S3Bucket, and Cilium policy requests in `CONTROL_NAMESPACE`, while the generated Deployment, Service, ConfigMap, Secret, and CiliumNetworkPolicy objects target `DEMO_NAMESPACE`.
 
 ## Environment Injection Contract
 
@@ -145,10 +152,6 @@ This keeps the Kratix Promises reusable outside the adapter. The Redis and S3Buc
 ## API Network Policy Contract
 
 The `CiliumAPIAccess` Promise is a generic network-policy Promise. It does not read Runtime Conditions Profiles directly.
-
-The `CiliumNamespaceLockdown` Promise renders namespace-scoped default-deny Cilium policy for workload pods, with DNS egress explicitly allowed so FQDN-based policies can still function. It excludes Kratix workflow pods so the platform can continue reconciling resource requests in a locked-down namespace.
-
-`05-rc-deploy.sh` also applies a narrow `kratix-workflow-kube-api-access` policy before submitting the `ApplicationRelease` request. This keeps reruns from getting stuck when a previous namespace lockdown policy already exists.
 
 The `CiliumAPIAccess` interface accepts:
 

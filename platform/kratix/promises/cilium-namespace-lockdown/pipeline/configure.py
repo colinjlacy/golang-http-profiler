@@ -22,7 +22,7 @@ def main() -> int:
     metadata = request.get("metadata") or {}
     spec = request.get("spec") or {}
     name = metadata["name"]
-    namespace = metadata.get("namespace", "default")
+    namespace = spec.get("targetNamespace") or metadata.get("namespace", "default")
     allow_dns = spec.get("allowDNS", True)
 
     policy = {
@@ -39,7 +39,7 @@ def main() -> int:
             },
         },
         "spec": {
-            "endpointSelector": workload_endpoint_selector(),
+            "endpointSelector": {},
             "ingress": [],
             "egress": dns_egress_rules() if allow_dns else [],
         },
@@ -51,6 +51,7 @@ def main() -> int:
     status = {
         "message": "Cilium namespace lockdown policy rendered",
         "policy": name,
+        "targetNamespace": namespace,
         "allowDNS": allow_dns,
     }
     METADATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -59,17 +60,6 @@ def main() -> int:
         encoding="utf-8",
     )
     return 0
-
-
-def workload_endpoint_selector() -> dict[str, Any]:
-    return {
-        "matchExpressions": [
-            {
-                "key": "kratix.io/promise-name",
-                "operator": "DoesNotExist",
-            }
-        ]
-    }
 
 
 def dns_egress_rules() -> list[dict[str, Any]]:

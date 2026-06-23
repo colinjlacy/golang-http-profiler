@@ -41,10 +41,10 @@ if [[ "${DEPLOY_STATUS}" -eq 0 ]]; then
 fi
 
 log "ApplicationRelease failed as expected. Recent workflow logs:"
-kubectl -n "${BREAKING_NAMESPACE}" get pods -l kratix.io/promise-name=application-release || true
-for pod in $(kubectl -n "${BREAKING_NAMESPACE}" get pods -l kratix.io/promise-name=application-release -o name 2>/dev/null | tail -n 3); do
+kubectl -n "${CONTROL_NAMESPACE}" get pods -l kratix.io/promise-name=application-release || true
+for pod in $(kubectl -n "${CONTROL_NAMESPACE}" get pods -l kratix.io/promise-name=application-release -o name 2>/dev/null | tail -n 3); do
   log "Logs for ${pod}"
-  kubectl -n "${BREAKING_NAMESPACE}" logs "${pod}" --all-containers=true --tail=120 || true
+  kubectl -n "${CONTROL_NAMESPACE}" logs "${pod}" --all-containers=true --tail=120 || true
 done
 
 log "Restoring compatible API catalog bundle"

@@ -79,10 +79,11 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
     spec = request.get("spec", {})
     name = metadata["name"]
     namespace = metadata.get("namespace", "default")
+    target_namespace = require_string(spec, "targetNamespace")
     image = require_string(spec, "image")
     port = int(spec.get("port", 8080))
     replicas = int(spec.get("replicas", 1))
-    image_pull_policy = spec.get("imagePullPolicy", "IfNotPresent")
+    image_pull_policy = spec.get("imagePullPolicy", "Always")
     readiness_path = spec.get("readinessPath", "/ready")
 
     profile = yaml.safe_load(require_string(spec, "profile"))
@@ -94,7 +95,7 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
     env: list[dict[str, Any]] = []
     emitted: list[dict[str, Any]] = []
     lockdown_name = "namespace-lockdown"
-    emitted.append(cilium_namespace_lockdown_request(lockdown_name, namespace, name))
+    emitted.append(cilium_namespace_lockdown_request(lockdown_name, namespace, target_namespace, name))
     summary: dict[str, Any] = {
         "apis": [],
         "apiAccessPolicies": [],
@@ -107,7 +108,7 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
         if condition.get("kind") != "api":
             continue
         api = validate_api_condition(condition, apis)
-        base_url = api.base_url or f"http://{api.name}.{namespace}.svc.cluster.local:{port}"
+        base_url = api.base_url or f"http://{api.name}.{target_namespace}.svc.cluster.local:{port}"
         api_env = env_from_configuration(
             condition,
             {
@@ -119,7 +120,7 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
         operations = (condition.get("interface") or {}).get("operations") or []
         if operations:
             policy_name = dns_name(f"{name}-{condition.get('name') or api.name}-access")
-            emitted.append(cilium_api_access_request(policy_name, namespace, name, api, base_url, operations))
+            emitted.append(cilium_api_access_request(policy_name, namespace, target_namespace, name, api, base_url, operations))
             summary["apiAccessPolicies"].append(
                 {
                     "condition": condition.get("name"),
@@ -148,7 +149,7 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
             continue
         redis_cache_count += 1
         redis_name = f"{name}-cache" if redis_cache_count == 1 else f"{name}-cache-{redis_cache_count}"
-        emitted.append(redis_request(redis_name, namespace, name))
+        emitted.append(redis_request(redis_name, namespace, target_namespace, name))
         redis_env = env_from_configuration(
             condition,
             {
@@ -176,7 +177,7 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
             continue
         s3_bucket_count += 1
         bucket_name = f"{name}-object-store" if s3_bucket_count == 1 else f"{name}-object-store-{s3_bucket_count}"
-        emitted.append(s3_bucket_request(bucket_name, namespace, name))
+        emitted.append(s3_bucket_request(bucket_name, namespace, target_namespace, name))
         s3_env = env_from_configuration(
             condition,
             {
@@ -199,8 +200,8 @@ def resolve(request: dict[str, Any]) -> OutputDocuments:
 
     emitted.extend(
         [
-            workload_deployment(name, namespace, image, image_pull_policy, port, replicas, readiness_path, env),
-            workload_service(name, namespace, port),
+            workload_deployment(name, target_namespace, image, image_pull_policy, port, replicas, readiness_path, env),
+            workload_service(name, target_namespace, port),
         ]
     )
     return OutputDocuments(emitted, summary)
@@ -472,7 +473,12 @@ def secret_value(name: str, key: str, optional: bool = False) -> dict[str, Any]:
     return {"valueFrom": {"secretKeyRef": {"name": name, "key": key}}, "optional": optional}
 
 
-def cilium_namespace_lockdown_request(name: str, namespace: str, workload_name: str) -> dict[str, Any]:
+def cilium_namespace_lockdown_request(
+    name: str,
+    namespace: str,
+    target_namespace: str,
+    workload_name: str,
+) -> dict[str, Any]:
     return {
         "apiVersion": PLATFORM_API_VERSION,
         "kind": "CiliumNamespaceLockdown",
@@ -485,11 +491,14 @@ def cilium_namespace_lockdown_request(name: str, namespace: str, workload_name: 
                 "kratix.io/component-of-resource-namespace": namespace,
             },
         },
-        "spec": {"allowDNS": True},
+        "spec": {
+            "allowDNS": True,
+            "targetNamespace": target_namespace,
+        },
     }
 
 
-def redis_request(name: str, namespace: str, workload_name: str) -> dict[str, Any]:
+def redis_request(name: str, namespace: str, target_namespace: str, workload_name: str) -> dict[str, Any]:
     return {
         "apiVersion": PLATFORM_API_VERSION,
         "kind": "Redis",
@@ -503,6 +512,7 @@ def redis_request(name: str, namespace: str, workload_name: str) -> dict[str, An
             },
         },
         "spec": {
+            "targetNamespace": target_namespace,
             "size": "small",
             "consumers": [consumer_spec(workload_name)],
         },
@@ -512,6 +522,7 @@ def redis_request(name: str, namespace: str, workload_name: str) -> dict[str, An
 def cilium_api_access_request(
     name: str,
     namespace: str,
+    target_namespace: str,
     workload_name: str,
     api: CatalogAPI,
     base_url: str,
@@ -530,6 +541,7 @@ def cilium_api_access_request(
             },
         },
         "spec": {
+            "targetNamespace": target_namespace,
             "workloadSelector": {
                 "matchLabels": workload_labels(workload_name),
             },
@@ -545,7 +557,7 @@ def cilium_api_access_request(
     }
 
 
-def s3_bucket_request(name: str, namespace: str, workload_name: str) -> dict[str, Any]:
+def s3_bucket_request(name: str, namespace: str, target_namespace: str, workload_name: str) -> dict[str, Any]:
     return {
         "apiVersion": PLATFORM_API_VERSION,
         "kind": "S3Bucket",
@@ -559,6 +571,7 @@ def s3_bucket_request(name: str, namespace: str, workload_name: str) -> dict[str
             },
         },
         "spec": {
+            "targetNamespace": target_namespace,
             "region": "us-east-1",
             "consumers": [consumer_spec(workload_name)],
         },

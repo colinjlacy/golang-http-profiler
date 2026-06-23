@@ -14,6 +14,7 @@ require_kubectl_context
 [[ -n "${S3_BUCKET_PIPELINE_IMAGE:-}" ]] || fail "S3_BUCKET_PIPELINE_IMAGE is not set; run 02-build-and-push-images.sh first"
 [[ -n "${APPLICATION_RELEASE_PIPELINE_IMAGE:-}" ]] || fail "APPLICATION_RELEASE_PIPELINE_IMAGE is not set; run 02-build-and-push-images.sh first"
 
+kubectl create namespace "${CONTROL_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace "${DEMO_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace "${CATALOG_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -49,23 +50,25 @@ render_template \
   APPLICATION_RELEASE_PIPELINE_IMAGE "${APPLICATION_RELEASE_PIPELINE_IMAGE}" \
   CATALOG_NAMESPACE "${CATALOG_NAMESPACE}"
 
-log "Installing Redis Promise"
+log "Rendered Promise manifests to ${BUILD_DIR}"
+
+log "Installing Redis Promise from ${REDIS_PROMISE}"
 kubectl apply -f "${REDIS_PROMISE}"
 wait_for_crd redis.platform.demoteam.dev
 
-log "Installing CiliumAPIAccess Promise"
+log "Installing CiliumAPIAccess Promise from ${CILIUM_API_ACCESS_PROMISE}"
 kubectl apply -f "${CILIUM_API_ACCESS_PROMISE}"
 wait_for_crd ciliumapiaccesses.platform.demoteam.dev
 
-log "Installing CiliumNamespaceLockdown Promise"
+log "Installing CiliumNamespaceLockdown Promise from ${CILIUM_NAMESPACE_LOCKDOWN_PROMISE}"
 kubectl apply -f "${CILIUM_NAMESPACE_LOCKDOWN_PROMISE}"
 wait_for_crd ciliumnamespacelockdowns.platform.demoteam.dev
 
-log "Installing S3Bucket Promise"
+log "Installing S3Bucket Promise from ${S3_BUCKET_PROMISE}"
 kubectl apply -f "${S3_BUCKET_PROMISE}"
 wait_for_crd s3buckets.platform.demoteam.dev
 
-log "Installing ApplicationRelease Promise"
+log "Installing ApplicationRelease Promise from ${APPLICATION_RELEASE_PROMISE}"
 kubectl apply -f "${APPLICATION_RELEASE_PROMISE}"
 wait_for_crd applicationreleases.platform.demoteam.dev
 

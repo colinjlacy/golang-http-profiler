@@ -13,6 +13,7 @@ APP_IMAGE="${APP_IMAGE:-${REQUEST_LOGGER_IMAGE:-}}"
 WORKLOAD_VERSION="${WORKLOAD_VERSION:-dev}"
 REQUEST_NAME="${REQUEST_NAME:-${APP_NAME}}"
 REQUEST_NAMESPACE="${REQUEST_NAMESPACE:-${DEMO_NAMESPACE}}"
+REQUEST_CONTROL_NAMESPACE="${REQUEST_CONTROL_NAMESPACE:-${CONTROL_NAMESPACE}}"
 
 [[ -d "${APP_SOURCE_DIR}" ]] || fail "APP_SOURCE_DIR does not exist: ${APP_SOURCE_DIR}"
 [[ -n "${APP_IMAGE}" ]] || fail "APP_IMAGE is not set; run 02-build-and-push-images.sh first or set APP_IMAGE"
@@ -23,36 +24,6 @@ REQUEST_FILE="${BUILD_DIR}/${REQUEST_NAME}-applicationrelease.yaml"
 contains_files() {
   local pattern="$1"
   find "${APP_SOURCE_DIR}" -name "${pattern}" -type f | grep -q .
-}
-
-ensure_kratix_workflow_api_access() {
-  local namespace="$1"
-
-  kubectl -n "${namespace}" apply -f - <<'EOF'
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: kratix-workflow-kube-api-access
-  labels:
-    app.kubernetes.io/name: kratix-workflow-kube-api-access
-    app.kubernetes.io/component: network-policy
-    app.kubernetes.io/managed-by: kratix
-    platform.demoteam.dev/policy-type: workflow-api-access
-spec:
-  endpointSelector:
-    matchExpressions:
-      - key: kratix.io/promise-name
-        operator: Exists
-  egress:
-    - toServices:
-        - k8sService:
-            serviceName: kubernetes
-            namespace: default
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-EOF
 }
 
 log "Generating Runtime Conditions Profile from ${APP_SOURCE_DIR}"
@@ -85,11 +56,13 @@ apiVersion: platform.demoteam.dev/v1alpha1
 kind: ApplicationRelease
 metadata:
   name: ${REQUEST_NAME}
-  namespace: ${REQUEST_NAMESPACE}
+  namespace: ${REQUEST_CONTROL_NAMESPACE}
 spec:
   image: ${APP_IMAGE}
+  imagePullPolicy: Always
   port: ${APP_PORT}
   readinessPath: /ready
+  targetNamespace: ${REQUEST_NAMESPACE}
   catalog:
     configMapRef:
       name: ${CATALOG_CONFIGMAP}
@@ -99,45 +72,46 @@ EOF
   sed 's/^/    /' "${PROFILE_FILE}"
 } >"${REQUEST_FILE}"
 
+kubectl create namespace "${REQUEST_CONTROL_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace "${REQUEST_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-log "Ensuring Kratix workflow pods can reach the Kubernetes API"
-ensure_kratix_workflow_api_access "${REQUEST_NAMESPACE}"
+log "Cleaning up legacy Kratix requests from workload namespace ${REQUEST_NAMESPACE}"
+cleanup_legacy_workload_namespace_requests "${REQUEST_NAMESPACE}" "${REQUEST_NAME}"
 
-log "Submitting ApplicationRelease request through Kratix"
+log "Submitting ApplicationRelease request through Kratix in ${REQUEST_CONTROL_NAMESPACE}"
 kubectl apply -f "${REQUEST_FILE}"
 
 log "Waiting for ApplicationRelease configure workflow"
-kubectl -n "${REQUEST_NAMESPACE}" wait "applicationrelease/${REQUEST_NAME}" \
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" wait "applicationrelease/${REQUEST_NAME}" \
   --for=condition=ConfigureWorkflowCompleted \
   --timeout=180s
 
 log "Waiting for generated Cilium namespace lockdown request"
-kubectl -n "${REQUEST_NAMESPACE}" wait "ciliumnamespacelockdown/namespace-lockdown" \
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" wait "ciliumnamespacelockdown/namespace-lockdown" \
   --for=condition=ConfigureWorkflowCompleted \
   --timeout=180s
 
 log "Waiting for generated Cilium API access request"
-kubectl -n "${REQUEST_NAMESPACE}" wait "ciliumapiaccess/${REQUEST_NAME}-todos-api-access" \
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" wait "ciliumapiaccess/${REQUEST_NAME}-todos-api-access" \
   --for=condition=ConfigureWorkflowCompleted \
   --timeout=180s
 
 log "Waiting for generated Redis request"
-kubectl -n "${REQUEST_NAMESPACE}" wait "redis/${REQUEST_NAME}-cache" \
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" wait "redis/${REQUEST_NAME}-cache" \
   --for=condition=ConfigureWorkflowCompleted \
   --timeout=180s
 
 log "Waiting for generated S3Bucket request"
-kubectl -n "${REQUEST_NAMESPACE}" wait "s3bucket/${REQUEST_NAME}-object-store" \
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" wait "s3bucket/${REQUEST_NAME}-object-store" \
   --for=condition=ConfigureWorkflowCompleted \
   --timeout=180s
 
 log "Waiting for generated application Deployment"
 wait_for_deployment "${REQUEST_NAMESPACE}" "${REQUEST_NAME}" 240s
 
-kubectl -n "${REQUEST_NAMESPACE}" get applicationrelease "${REQUEST_NAME}"
-kubectl -n "${REQUEST_NAMESPACE}" get ciliumnamespacelockdown namespace-lockdown
-kubectl -n "${REQUEST_NAMESPACE}" get ciliumapiaccess "${REQUEST_NAME}-todos-api-access"
-kubectl -n "${REQUEST_NAMESPACE}" get redis "${REQUEST_NAME}-cache"
-kubectl -n "${REQUEST_NAMESPACE}" get s3bucket "${REQUEST_NAME}-object-store"
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" get applicationrelease "${REQUEST_NAME}"
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" get ciliumnamespacelockdown namespace-lockdown
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" get ciliumapiaccess "${REQUEST_NAME}-todos-api-access"
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" get redis "${REQUEST_NAME}-cache"
+kubectl -n "${REQUEST_CONTROL_NAMESPACE}" get s3bucket "${REQUEST_NAME}-object-store"
 kubectl -n "${REQUEST_NAMESPACE}" get deployment "${REQUEST_NAME}"

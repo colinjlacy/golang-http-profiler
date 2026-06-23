@@ -51,7 +51,7 @@ def render_policy(request: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     metadata = request.get("metadata") or {}
     spec = request.get("spec") or {}
     name = require_string(metadata, "name", "metadata.name")
-    namespace = metadata.get("namespace") or "default"
+    namespace = spec.get("targetNamespace") or metadata.get("namespace") or "default"
 
     selector = require_mapping(spec, "workloadSelector", "spec.workloadSelector")
     match_labels = require_mapping(selector, "matchLabels", "spec.workloadSelector.matchLabels")

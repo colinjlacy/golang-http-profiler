@@ -32,10 +32,13 @@ spec:
                 spec:
                   type: object
                   required:
+                    - targetNamespace
                     - workloadSelector
                     - destination
                     - rules
                   properties:
+                    targetNamespace:
+                      type: string
                     workloadSelector:
                       type: object
                       required:
@@ -107,3 +110,4 @@ spec:
             containers:
               - name: configure
                 image: __CILIUM_API_ACCESS_PIPELINE_IMAGE__
+                imagePullPolicy: Always

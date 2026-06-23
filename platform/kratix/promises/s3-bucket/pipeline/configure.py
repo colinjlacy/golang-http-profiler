@@ -43,7 +43,7 @@ def provision(request: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, 
     metadata = request.get("metadata", {})
     spec = request.get("spec", {})
     name = metadata["name"]
-    namespace = metadata.get("namespace", "default")
+    namespace = spec.get("targetNamespace") or metadata.get("namespace", "default")
     region = spec.get("region", "us-east-1")
     consumers = spec.get("consumers") or []
 

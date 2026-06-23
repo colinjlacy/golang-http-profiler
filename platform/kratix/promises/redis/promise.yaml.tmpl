@@ -29,7 +29,11 @@ spec:
               properties:
                 spec:
                   type: object
+                  required:
+                    - targetNamespace
                   properties:
+                    targetNamespace:
+                      type: string
                     size:
                       type: string
                       default: small
@@ -63,3 +67,4 @@ spec:
             containers:
               - name: configure
                 image: __REDIS_PIPELINE_IMAGE__
+                imagePullPolicy: Always
