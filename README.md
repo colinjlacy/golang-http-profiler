@@ -10,7 +10,7 @@ Downstream tooling is often a patchwork of one-off configurations and fragmented
 
 ## The Proposal
 
-This tool replaces chaos and confusion with a [three-step workflow](colinjlacy.github.io/runtime-conditions-profiles/):
+This tool replaces chaos and confusion with a [three-step workflow](https://colinjlacy.github.io/runtime-conditions-profiles/):
 
 - The source code uses integrations. For an example, the demo app below calls an HTTP API, Redis, and S3.
 - A generator emits a profile that includes requirements and environment variable names, not target values.
