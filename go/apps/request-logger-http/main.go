@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	rc "github.com/colinjlacy/golang-ast-inspection/go/runtimeconditions"
 	"github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3"
 )
 
@@ -25,19 +24,7 @@ type Todo struct {
 }
 
 func init() {
-	rc.API("todos-api",
-		rc.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
-		rc.GET("/todos/{id}", rc.Response[Todo]()),
-		rc.Env("baseUrl", "TODOS_API_URL"),
-	)
-	rc.Cache("request-cache",
-		rc.KeyValue(rc.Redis),
-		rc.EnvAlternative(rc.Env("url", "REDIS_URL")),
-		rc.EnvAlternative(
-			rc.Env("hostname", "REDIS_HOST"),
-			rc.Env("port", "REDIS_PORT"),
-		),
-	)
+	declaration()
 }
 
 func main() {

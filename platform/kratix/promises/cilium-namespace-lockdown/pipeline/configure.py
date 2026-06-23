@@ -39,7 +39,7 @@ def main() -> int:
             },
         },
         "spec": {
-            "endpointSelector": {},
+            "endpointSelector": workload_endpoint_selector(),
             "ingress": [],
             "egress": dns_egress_rules() if allow_dns else [],
         },
@@ -59,6 +59,17 @@ def main() -> int:
         encoding="utf-8",
     )
     return 0
+
+
+def workload_endpoint_selector() -> dict[str, Any]:
+    return {
+        "matchExpressions": [
+            {
+                "key": "kratix.io/promise-name",
+                "operator": "DoesNotExist",
+            }
+        ]
+    }
 
 
 def dns_egress_rules() -> list[dict[str, Any]]:

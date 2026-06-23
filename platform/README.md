@@ -146,7 +146,9 @@ This keeps the Kratix Promises reusable outside the adapter. The Redis and S3Buc
 
 The `CiliumAPIAccess` Promise is a generic network-policy Promise. It does not read Runtime Conditions Profiles directly.
 
-The `CiliumNamespaceLockdown` Promise renders namespace-scoped default-deny Cilium policy for all pods in the namespace, with DNS egress explicitly allowed so FQDN-based policies can still function.
+The `CiliumNamespaceLockdown` Promise renders namespace-scoped default-deny Cilium policy for workload pods, with DNS egress explicitly allowed so FQDN-based policies can still function. It excludes Kratix workflow pods so the platform can continue reconciling resource requests in a locked-down namespace.
+
+`05-rc-deploy.sh` also applies a narrow `kratix-workflow-kube-api-access` policy before submitting the `ApplicationRelease` request. This keeps reruns from getting stuck when a previous namespace lockdown policy already exists.
 
 The `CiliumAPIAccess` interface accepts:
 

@@ -25,6 +25,36 @@ contains_files() {
   find "${APP_SOURCE_DIR}" -name "${pattern}" -type f | grep -q .
 }
 
+ensure_kratix_workflow_api_access() {
+  local namespace="$1"
+
+  kubectl -n "${namespace}" apply -f - <<'EOF'
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kratix-workflow-kube-api-access
+  labels:
+    app.kubernetes.io/name: kratix-workflow-kube-api-access
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/managed-by: kratix
+    platform.demoteam.dev/policy-type: workflow-api-access
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: kratix.io/promise-name
+        operator: Exists
+  egress:
+    - toServices:
+        - k8sService:
+            serviceName: kubernetes
+            namespace: default
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+EOF
+}
+
 log "Generating Runtime Conditions Profile from ${APP_SOURCE_DIR}"
 if contains_files '*.go'; then
   require_cmd go
@@ -70,6 +100,9 @@ EOF
 } >"${REQUEST_FILE}"
 
 kubectl create namespace "${REQUEST_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+log "Ensuring Kratix workflow pods can reach the Kubernetes API"
+ensure_kratix_workflow_api_access "${REQUEST_NAMESPACE}"
 
 log "Submitting ApplicationRelease request through Kratix"
 kubectl apply -f "${REQUEST_FILE}"
