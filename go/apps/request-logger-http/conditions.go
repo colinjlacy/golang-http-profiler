@@ -17,14 +17,5 @@ func declaration() {
 				rc.Env("port", "REDIS_PORT"),
 			),
 		)
-		rc.Datastore("orders",
-			rc.Relational(rc.Postgres),
-			rc.Env("host", "POSTGRES_HOST"),
-			rc.Env("port", "POSTGRES_PORT"),
-			rc.Env("user", "POSTGRES_USER"),
-			rc.Env("password", "POSTGRES_PASSWORD"),
-			rc.Env("database", "POSTGRES_DB"),
-		)
-
 	}
 }
