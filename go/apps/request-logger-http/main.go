@@ -61,16 +61,18 @@ func demoHandler(w http.ResponseWriter, r *http.Request) {
 	result := map[string]string{
 		"todosApi": statusString(checkTodosAPI(ctx)),
 		"cache":    statusString(checkRedis(ctx)),
-		"auditLog": statusString(writeAuditLog(ctx, "request-logger demo")),
 	}
 
 	status := http.StatusOK
-	if result["todosApi"] != "ok" || result["cache"] != "ok" || result["auditLog"] != "ok" {
-		status = http.StatusBadGateway
+	if result["todosApi"] != "ok" || result["cache"] != "ok" {
+		status = http.StatusInternalServerError
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	if status == http.StatusInternalServerError {
+		w.Write([]byte(fmt.Sprintf("One or more dependencies are not healthy: todosApi=%s, cache=%s", result["todosApi"], result["cache"])))
+	}
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		log.Printf("encode response: %v", err)
 	}
