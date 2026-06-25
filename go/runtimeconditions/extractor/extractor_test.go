@@ -11,11 +11,13 @@ func TestExtractDirWithAliasedImport(t *testing.T) {
 	dir := t.TempDir()
 	source := `package main
 
-import runcon "github.com/colinjlacy/golang-ast-inspection/go/runtimeconditions"
+import (
+	common "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
+	env "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
+)
 
 const (
 	todoPath = "/todos"
-	eventsSubject = "todos.changed"
 )
 
 type CreateTodoRequest struct {
@@ -30,24 +32,16 @@ type Todo struct {
 	Completed bool ` + "`json:\"completed\"`" + `
 }
 
-type TodoEvent struct {
-	Todo Todo ` + "`json:\"todo\"`" + `
-}
-
-var _ = runcon.API("todos-api",
-	runcon.POST(todoPath, runcon.Request[CreateTodoRequest](), runcon.Response[Todo]()),
-	runcon.Env("baseUrl", "TODOS_API_URL"),
+var _ = common.API("todos-api",
+	common.POST(todoPath, common.Request[CreateTodoRequest](), common.Response[Todo]()),
+	env.Env("baseUrl", "TODOS_API_URL"),
 )
 
-var _ = runcon.Datastore("primary-db", runcon.Relational(runcon.MySQL))
-var _ = runcon.Cache("todo-cache",
-	runcon.KeyValue(runcon.Redis),
-	runcon.EnvAlternative(runcon.Env("url", "REDIS_URL")),
-	runcon.EnvAlternative(runcon.Env("hostname", "REDIS_HOST"), runcon.Env("port", "REDIS_PORT")),
-)
-var _ = runcon.MessageBus("todo-events",
-	runcon.PubSub(runcon.NATS),
-	runcon.Publishes(eventsSubject, runcon.Payload[TodoEvent]()),
+var _ = common.Datastore("primary-db", common.Relational(common.MySQL))
+var _ = common.Cache("todo-cache",
+	common.KeyValue(common.Redis),
+	env.EnvAlternative(env.Env("url", "REDIS_URL")),
+	env.EnvAlternative(env.Env("hostname", "REDIS_HOST"), env.Env("port", "REDIS_PORT")),
 )
 `
 
@@ -64,11 +58,11 @@ var _ = runcon.MessageBus("todo-events",
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/common-integrations:v1alpha1", "https://runtimeconditions.io/extensions/env-configuration:v1alpha1", "runtimeconditions.io/message-bus/v1alpha1"}) {
+	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/common-integrations:v1alpha1", "https://runtimeconditions.io/extensions/env-configuration:v1alpha1"}) {
 		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
 	}
-	if len(profile.Conditions) != 4 {
-		t.Fatalf("expected 4 conditions, got %d", len(profile.Conditions))
+	if len(profile.Conditions) != 3 {
+		t.Fatalf("expected 3 conditions, got %d", len(profile.Conditions))
 	}
 
 	api := profile.Conditions[0]
@@ -98,13 +92,6 @@ var _ = runcon.MessageBus("todo-events",
 		t.Fatalf("unexpected cache configuration: %#v", cache.Configuration)
 	}
 
-	messageBus := profile.Conditions[3]
-	if messageBus.Kind != "runtimeconditions.message_bus" || messageBus.Interface.Engine != "nats" {
-		t.Fatalf("unexpected message bus condition: %#v", messageBus)
-	}
-	if got := messageBus.Interface.Subjects[0].PayloadSchema.(map[string]any)["todo"].(map[string]any)["title"]; got != "string" {
-		t.Fatalf("unexpected payload schema title: %#v", got)
-	}
 }
 
 func TestExtractDirWithThirdPartyPackageManifest(t *testing.T) {

@@ -11,7 +11,5 @@ platform/.env.generated
 server
 traffic
 
-**/*/.terraform*
-**/*/terraform.tfstate*
-**/*/plan
 kubeconfig
+/tofu

@@ -17,12 +17,11 @@ import (
 )
 
 const (
-	// DeclarationImportPath is the Go import path that this extractor recognizes.
-	DeclarationImportPath = "github.com/colinjlacy/golang-ast-inspection/go/runtimeconditions"
+	commonIntegrationsGoImportPath = "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
+	envConfigurationGoImportPath   = "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
 
 	commonIntegrationsExtension = "https://runtimeconditions.io/extensions/common-integrations:v1alpha1"
 	envConfigurationExtension   = "https://runtimeconditions.io/extensions/env-configuration:v1alpha1"
-	messageBusExtension         = "runtimeconditions.io/message-bus/v1alpha1"
 )
 
 // Options configures source extraction and the generated profile metadata.
@@ -274,11 +273,6 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 					condition, err = e.parseCache(call, imports)
 					if err == nil {
 						extensions[commonIntegrationsExtension] = true
-					}
-				case "MessageBus":
-					condition, err = e.parseMessageBus(call, imports)
-					if err == nil {
-						extensions[messageBusExtension] = true
 					}
 				default:
 					return true
@@ -650,11 +644,12 @@ func runtimeConditionImports(file *ast.File) importSet {
 	imports := importSet{aliases: make(map[string]bool)}
 	for _, spec := range file.Imports {
 		pathValue, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || pathValue != DeclarationImportPath {
+		if err != nil || !isDeclarationImportPath(pathValue) {
 			continue
 		}
+		defaultAlias := declarationImportDefaultAlias(pathValue)
 		if spec.Name == nil {
-			imports.aliases["runtimeconditions"] = true
+			imports.aliases[defaultAlias] = true
 			continue
 		}
 		switch spec.Name.Name {
@@ -667,6 +662,26 @@ func runtimeConditionImports(file *ast.File) importSet {
 		}
 	}
 	return imports
+}
+
+func isDeclarationImportPath(path string) bool {
+	switch path {
+	case commonIntegrationsGoImportPath, envConfigurationGoImportPath:
+		return true
+	default:
+		return false
+	}
+}
+
+func declarationImportDefaultAlias(path string) string {
+	switch path {
+	case commonIntegrationsGoImportPath:
+		return "commonintegrations"
+	case envConfigurationGoImportPath:
+		return "envconfiguration"
+	default:
+		return ""
+	}
 }
 
 func runtimeConditionBindingImports(file *ast.File, bindings []*goBinding) goBindingImports {
@@ -1346,90 +1361,6 @@ func (e *extractor) parseCache(call *ast.CallExpr, imports importSet) (Condition
 	return condition, nil
 }
 
-func (e *extractor) parseMessageBus(call *ast.CallExpr, imports importSet) (Condition, error) {
-	if len(call.Args) == 0 {
-		return Condition{}, fmt.Errorf("MessageBus requires a name")
-	}
-	name, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Condition{}, fmt.Errorf("MessageBus name must be a string literal or string const")
-	}
-	condition := Condition{
-		Name: name,
-		Kind: "runtimeconditions.message_bus",
-		Interface: Interface{
-			Type: "runtimeconditions.pubsub",
-		},
-	}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, _, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok {
-			continue
-		}
-		if handled, err := e.applyConfigurationOption(&condition, optionName, subcall, imports); handled {
-			if err != nil {
-				return Condition{}, err
-			}
-			continue
-		}
-		switch optionName {
-		case "PubSub":
-			if len(subcall.Args) > 0 {
-				condition.Interface.Engine = e.engineValue(subcall.Args[0], imports)
-			}
-		case "Publishes", "Subscribes":
-			subject, err := e.parseSubject(optionName, subcall, imports)
-			if err != nil {
-				return Condition{}, err
-			}
-			condition.Interface.Subjects = append(condition.Interface.Subjects, subject)
-		}
-	}
-	return condition, nil
-}
-
-func (e *extractor) parseSubject(optionName string, call *ast.CallExpr, imports importSet) (Subject, error) {
-	if len(call.Args) == 0 {
-		return Subject{}, fmt.Errorf("%s requires a subject name", optionName)
-	}
-	name, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Subject{}, fmt.Errorf("%s subject must be a string literal or string const", optionName)
-	}
-
-	subject := Subject{Name: name}
-	if optionName == "Publishes" {
-		subject.Direction = "publish"
-	} else {
-		subject.Direction = "subscribe"
-	}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		suboptionName, typeArgs, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok || suboptionName != "Payload" {
-			continue
-		}
-		if len(typeArgs) != 1 {
-			return Subject{}, fmt.Errorf("Payload requires exactly one type argument")
-		}
-		schema, err := e.schemaForType(typeArgs[0])
-		if err != nil {
-			return Subject{}, err
-		}
-		subject.PayloadSchema = schema
-	}
-	return subject, nil
-}
-
 func (e *extractor) schemaForType(expr ast.Expr) (any, error) {
 	switch typed := unparen(expr).(type) {
 	case *ast.Ident:
@@ -1593,8 +1524,6 @@ func engineName(name string) string {
 		return "redis"
 	case "Memcached":
 		return "memcached"
-	case "NATS":
-		return "nats"
 	default:
 		return strings.ToLower(name)
 	}

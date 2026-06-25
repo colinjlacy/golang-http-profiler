@@ -1,9 +1,6 @@
-// Package runtimeconditions provides typed declaration helpers for Runtime
-// Conditions Profile generation.
-//
-// These helpers are intentionally no-op at runtime. The static profiler reads
-// calls to this package from Go source and converts them to profile YAML.
-package runtimeconditions
+// Package commonintegrations provides typed no-op declaration helpers for the
+// Common Integrations Runtime Conditions extension.
+package commonintegrations
 
 // Declaration is the inert value returned by top-level condition declarations.
 type Declaration struct{}
@@ -24,72 +21,30 @@ const (
 
 	Redis     Engine = "redis"
 	Memcached Engine = "memcached"
-
-	NATS Engine = "nats"
 )
 
 // APIOption configures an API declaration.
 type APIOption interface {
-	apiOption()
+	CommonIntegrationsAPIOption()
 }
 
 // OperationOption configures an API operation declaration.
 type OperationOption interface {
-	operationOption()
+	CommonIntegrationsOperationOption()
 }
 
 type apiOption struct{}
 
-func (apiOption) apiOption() {}
+func (apiOption) CommonIntegrationsAPIOption() {}
 
 type operationOption struct{}
 
-func (operationOption) operationOption() {}
+func (operationOption) CommonIntegrationsOperationOption() {}
 
 type schemaOption struct{}
 
-func (schemaOption) apiOption()       {}
-func (schemaOption) operationOption() {}
-
-// EnvOption configures an environment variable mapping declaration.
-type EnvOption interface {
-	envOption()
-}
-
-type envOption struct{}
-
-func (envOption) envOption() {}
-
-// ConditionConfigOption configures workload-facing inputs for a Condition.
-type ConditionConfigOption struct{}
-
-func (ConditionConfigOption) apiOption()        {}
-func (ConditionConfigOption) datastoreOption()  {}
-func (ConditionConfigOption) cacheOption()      {}
-func (ConditionConfigOption) messageBusOption() {}
-
-// Env declares that a Condition property is supplied through an environment
-// variable with the provided name.
-func Env(property, name string, options ...EnvOption) ConditionConfigOption {
-	return ConditionConfigOption{}
-}
-
-// EnvAlternative declares one acceptable set of environment variables for a
-// Condition. Platform adapters may choose any complete alternative they can
-// satisfy.
-func EnvAlternative(inputs ...ConditionConfigOption) ConditionConfigOption {
-	return ConditionConfigOption{}
-}
-
-// Sensitive marks an environment variable mapping as sensitive.
-func Sensitive() EnvOption {
-	return envOption{}
-}
-
-// Optional marks an environment variable mapping as optional.
-func Optional() EnvOption {
-	return envOption{}
-}
+func (schemaOption) CommonIntegrationsAPIOption()       {}
+func (schemaOption) CommonIntegrationsOperationOption() {}
 
 // API declares an external API dependency.
 func API(name string, options ...APIOption) Declaration {
@@ -153,12 +108,12 @@ func Response[T any]() schemaOption {
 
 // DatastoreOption configures a datastore declaration.
 type DatastoreOption interface {
-	datastoreOption()
+	CommonIntegrationsDatastoreOption()
 }
 
 type datastoreOption struct{}
 
-func (datastoreOption) datastoreOption() {}
+func (datastoreOption) CommonIntegrationsDatastoreOption() {}
 
 // Datastore declares a persistent datastore dependency.
 func Datastore(name string, options ...DatastoreOption) Declaration {
@@ -177,12 +132,12 @@ func Document(engine Engine) DatastoreOption {
 
 // CacheOption configures a cache declaration.
 type CacheOption interface {
-	cacheOption()
+	CommonIntegrationsCacheOption()
 }
 
 type cacheOption struct{}
 
-func (cacheOption) cacheOption() {}
+func (cacheOption) CommonIntegrationsCacheOption() {}
 
 // Cache declares a volatile cache dependency.
 func Cache(name string, options ...CacheOption) Declaration {
@@ -192,47 +147,4 @@ func Cache(name string, options ...CacheOption) Declaration {
 // KeyValue declares a key/value cache interface and engine.
 func KeyValue(engine Engine) CacheOption {
 	return cacheOption{}
-}
-
-// MessageBusOption configures a message bus declaration.
-type MessageBusOption interface {
-	messageBusOption()
-}
-
-// SubjectOption configures a message bus subject declaration.
-type SubjectOption interface {
-	subjectOption()
-}
-
-type messageBusOption struct{}
-
-func (messageBusOption) messageBusOption() {}
-
-type subjectOption struct{}
-
-func (subjectOption) subjectOption() {}
-
-// MessageBus declares an extension-defined message bus dependency.
-func MessageBus(name string, options ...MessageBusOption) Declaration {
-	return Declaration{}
-}
-
-// PubSub declares a publish/subscribe message bus interface and engine.
-func PubSub(engine Engine) MessageBusOption {
-	return messageBusOption{}
-}
-
-// Publishes declares a subject the workload publishes to.
-func Publishes(subject string, options ...SubjectOption) MessageBusOption {
-	return messageBusOption{}
-}
-
-// Subscribes declares a subject the workload subscribes to.
-func Subscribes(subject string, options ...SubjectOption) MessageBusOption {
-	return messageBusOption{}
-}
-
-// Payload attaches a message payload schema based on T.
-func Payload[T any]() SubjectOption {
-	return subjectOption{}
 }

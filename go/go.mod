@@ -3,6 +3,8 @@ module github.com/colinjlacy/golang-ast-inspection/go
 go 1.25.0
 
 require (
+	github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go v0.0.0
+	github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go v0.0.0
 	github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2 v0.0.0
 	github.com/lib/pq v1.10.9
 	github.com/nats-io/nats.go v1.38.0
@@ -11,6 +13,10 @@ require (
 )
 
 replace github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2 => ../demo/aws-sdk-go-v2
+
+replace github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go => ../extensions/common-integrations/go
+
+replace github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go => ../extensions/env-configuration/go
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
