@@ -30,7 +30,7 @@ if contains_files '*.go'; then
   require_cmd go
   (
     cd "${REPO_ROOT}/go"
-    go run ./profiler/cmd/runtimeconditions \
+    go run ./profiler \
       -dir "${APP_SOURCE_DIR}" \
       -name "${REQUEST_NAME}" \
       -workload-version "${WORKLOAD_VERSION}" \

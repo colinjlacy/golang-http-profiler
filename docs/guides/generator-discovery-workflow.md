@@ -109,7 +109,7 @@ Running the generator:
 
 ```sh
 cd go
-go run ./profiler/cmd/runtimeconditions \
+go run ./profiler \
   -dir ./apps/request-logger-http \
   -name request-logger-http \
   -workload-uri github.com/example/request-logger-http \

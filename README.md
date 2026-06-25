@@ -67,7 +67,7 @@ The generated eBPF bindings are produced by `bpf2go` from `ebpf-profiler/pkg/pro
 ```sh
 cd go
 go test ./...
-go run ./profiler/cmd/runtimeconditions -dir ./apps/traffic -name traffic-generator
+go run ./profiler -dir ./apps/traffic -name traffic-generator
 docker compose up
 ```
 
