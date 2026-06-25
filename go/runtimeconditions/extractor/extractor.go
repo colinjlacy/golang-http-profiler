@@ -16,14 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	commonIntegrationsGoImportPath = "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
-	envConfigurationGoImportPath   = "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
-
-	commonIntegrationsExtension = "https://runtimeconditions.io/extensions/common-integrations:v1alpha1"
-	envConfigurationExtension   = "https://runtimeconditions.io/extensions/env-configuration:v1alpha1"
-)
-
 // Options configures source extraction and the generated profile metadata.
 type Options struct {
 	Name            string
@@ -114,11 +106,6 @@ type packageScope struct {
 	stringConsts map[string]string
 }
 
-type importSet struct {
-	aliases map[string]bool
-	dot     bool
-}
-
 type goBinding struct {
 	ExtensionID             string
 	ExtensionDefinitionPath string
@@ -153,9 +140,15 @@ type goBindingValue struct {
 }
 
 type goBindingOption struct {
-	Function string `yaml:"function"`
-	Target   string `yaml:"target"`
-	ValueArg int    `yaml:"valueArg"`
+	Function   string            `yaml:"function"`
+	Target     string            `yaml:"target"`
+	Value      string            `yaml:"value"`
+	ValueArg   *int              `yaml:"valueArg"`
+	TypeArg    *int              `yaml:"typeArg"`
+	EngineArg  *int              `yaml:"engineArg"`
+	Method     string            `yaml:"method"`
+	StringArgs map[string]int    `yaml:"stringArgs"`
+	Options    []goBindingOption `yaml:"options"`
 }
 
 type goBindingImports struct {
@@ -239,9 +232,8 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 	var conditions []Condition
 
 	for _, parsed := range files {
-		imports := runtimeConditionImports(parsed.file)
 		bindingImports := runtimeConditionBindingImports(parsed.file, bindings)
-		if len(imports.aliases) == 0 && !imports.dot && len(bindingImports.aliases) == 0 && len(bindingImports.dot) == 0 {
+		if len(bindingImports.aliases) == 0 && len(bindingImports.dot) == 0 {
 			continue
 		}
 
@@ -254,40 +246,6 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 			if !ok {
 				return true
 			}
-			name, _, ok := callNameAndTypeArgs(call, imports)
-			if ok {
-				var condition Condition
-				var err error
-				switch name {
-				case "API":
-					condition, err = e.parseAPI(call, imports)
-					if err == nil {
-						extensions[commonIntegrationsExtension] = true
-					}
-				case "Datastore":
-					condition, err = e.parseDatastore(call, imports)
-					if err == nil {
-						extensions[commonIntegrationsExtension] = true
-					}
-				case "Cache":
-					condition, err = e.parseCache(call, imports)
-					if err == nil {
-						extensions[commonIntegrationsExtension] = true
-					}
-				default:
-					return true
-				}
-				if err != nil {
-					walkErr = e.nodeError(call, err)
-					return false
-				}
-				if condition.Configuration != nil {
-					extensions[envConfigurationExtension] = true
-				}
-				conditions = append(conditions, condition)
-				return false
-			}
-
 			binding, declaration, ok := bindingDeclarationForCall(call, bindingImports)
 			if !ok {
 				return true
@@ -298,9 +256,6 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 				return false
 			}
 			extensions[binding.ExtensionID] = true
-			if condition.Configuration != nil {
-				extensions[envConfigurationExtension] = true
-			}
 			conditions = append(conditions, condition)
 			return false
 		})
@@ -640,50 +595,6 @@ func (s *packageScope) collect(file *ast.File) {
 	}
 }
 
-func runtimeConditionImports(file *ast.File) importSet {
-	imports := importSet{aliases: make(map[string]bool)}
-	for _, spec := range file.Imports {
-		pathValue, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || !isDeclarationImportPath(pathValue) {
-			continue
-		}
-		defaultAlias := declarationImportDefaultAlias(pathValue)
-		if spec.Name == nil {
-			imports.aliases[defaultAlias] = true
-			continue
-		}
-		switch spec.Name.Name {
-		case ".":
-			imports.dot = true
-		case "_":
-			continue
-		default:
-			imports.aliases[spec.Name.Name] = true
-		}
-	}
-	return imports
-}
-
-func isDeclarationImportPath(path string) bool {
-	switch path {
-	case commonIntegrationsGoImportPath, envConfigurationGoImportPath:
-		return true
-	default:
-		return false
-	}
-}
-
-func declarationImportDefaultAlias(path string) string {
-	switch path {
-	case commonIntegrationsGoImportPath:
-		return "commonintegrations"
-	case envConfigurationGoImportPath:
-		return "envconfiguration"
-	default:
-		return ""
-	}
-}
-
 func runtimeConditionBindingImports(file *ast.File, bindings []*goBinding) goBindingImports {
 	imports := goBindingImports{
 		aliases:      make(map[string]*goBinding),
@@ -720,38 +631,6 @@ func runtimeConditionBindingImports(file *ast.File, bindings []*goBinding) goBin
 	}
 	imports.collectReceiverVars(file)
 	return imports
-}
-
-func callNameAndTypeArgs(call *ast.CallExpr, imports importSet) (string, []ast.Expr, bool) {
-	fun := unparen(call.Fun)
-	var typeArgs []ast.Expr
-
-	for {
-		switch typed := fun.(type) {
-		case *ast.IndexExpr:
-			typeArgs = append(typeArgs, typed.Index)
-			fun = unparen(typed.X)
-		case *ast.IndexListExpr:
-			typeArgs = append(typeArgs, typed.Indices...)
-			fun = unparen(typed.X)
-		default:
-			goto resolved
-		}
-	}
-
-resolved:
-	switch expr := fun.(type) {
-	case *ast.SelectorExpr:
-		ident, ok := unparen(expr.X).(*ast.Ident)
-		if ok && imports.aliases[ident.Name] {
-			return expr.Sel.Name, typeArgs, true
-		}
-	case *ast.Ident:
-		if imports.dot {
-			return expr.Name, typeArgs, true
-		}
-	}
-	return "", nil, false
 }
 
 func bindingDeclarationForCall(call *ast.CallExpr, imports goBindingImports) (*goBinding, goBindingDeclaration, bool) {
@@ -826,26 +705,35 @@ func bindingConstructorForCall(call *ast.CallExpr, imports goBindingImports) (*g
 	return nil, "", false
 }
 
-func bindingOptionForCall(call *ast.CallExpr, imports goBindingImports, binding *goBinding, declaration goBindingDeclaration) (goBindingOption, bool) {
-	name, optionBinding, ok := callNameAndBinding(call, imports)
+func bindingOptionForCall(call *ast.CallExpr, imports goBindingImports, binding *goBinding, options []goBindingOption) (goBindingOption, []ast.Expr, bool) {
+	name, typeArgs, optionBinding, ok := callNameTypeArgsAndBinding(call, imports)
 	if !ok || optionBinding != binding {
-		return goBindingOption{}, false
+		return goBindingOption{}, nil, false
 	}
-	for _, option := range declaration.Options {
+	for _, option := range options {
 		if option.Function == name {
-			return option, true
+			return option, typeArgs, true
 		}
 	}
-	return goBindingOption{}, false
+	return goBindingOption{}, nil, false
 }
 
 func callNameAndBinding(call *ast.CallExpr, imports goBindingImports) (string, *goBinding, bool) {
+	name, _, binding, ok := callNameTypeArgsAndBinding(call, imports)
+	return name, binding, ok
+}
+
+func callNameTypeArgsAndBinding(call *ast.CallExpr, imports goBindingImports) (string, []ast.Expr, *goBinding, bool) {
 	fun := unparen(call.Fun)
+	var typeArgs []ast.Expr
+
 	for {
 		switch typed := fun.(type) {
 		case *ast.IndexExpr:
+			typeArgs = append(typeArgs, typed.Index)
 			fun = unparen(typed.X)
 		case *ast.IndexListExpr:
+			typeArgs = append(typeArgs, typed.Indices...)
 			fun = unparen(typed.X)
 		default:
 			goto resolved
@@ -857,21 +745,21 @@ resolved:
 	case *ast.SelectorExpr:
 		ident, ok := unparen(expr.X).(*ast.Ident)
 		if !ok {
-			return "", nil, false
+			return "", nil, nil, false
 		}
 		binding := imports.aliases[ident.Name]
 		if binding == nil {
-			return "", nil, false
+			return "", nil, nil, false
 		}
-		return expr.Sel.Name, binding, true
+		return expr.Sel.Name, typeArgs, binding, true
 	case *ast.Ident:
 		for _, binding := range imports.dot {
 			if binding.hasDeclaration(expr.Name) || binding.hasOption(expr.Name) || binding.hasConstant(expr.Name) {
-				return expr.Name, binding, true
+				return expr.Name, typeArgs, binding, true
 			}
 		}
 	}
-	return "", nil, false
+	return "", nil, nil, false
 }
 
 func receiverMethodNameAndBinding(call *ast.CallExpr, imports goBindingImports) (string, goBindingReceiver, bool) {
@@ -914,10 +802,17 @@ func (b *goBinding) hasDeclaration(name string) bool {
 
 func (b *goBinding) hasOption(name string) bool {
 	for _, declaration := range b.Declarations {
-		for _, option := range declaration.Options {
-			if option.Function == name {
-				return true
-			}
+		if hasBindingOption(declaration.Options, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBindingOption(options []goBindingOption, name string) bool {
+	for _, option := range options {
+		if option.Function == name || hasBindingOption(option.Options, name) {
+			return true
 		}
 	}
 	return false
@@ -964,23 +859,257 @@ func (e *extractor) parseBindingCondition(call *ast.CallExpr, binding *goBinding
 		if !ok {
 			continue
 		}
-		option, ok := bindingOptionForCall(subcall, imports, binding, declaration)
+		option, typeArgs, ok := bindingOptionForCall(subcall, imports, binding, declaration.Options)
 		if !ok {
 			continue
 		}
-		if option.ValueArg >= len(subcall.Args) {
-			return Condition{}, fmt.Errorf("%s requires a value argument", option.Function)
-		}
-		value, ok := e.bindingValue(subcall.Args[option.ValueArg], imports, binding)
-		if !ok {
-			return Condition{}, fmt.Errorf("%s value must be a string literal, string const, or binding constant", option.Function)
-		}
-		if err := applyBindingValue(&condition, option.Target, value); err != nil {
+		if err := e.applyBindingOption(&condition, option, subcall, typeArgs, imports, binding); err != nil {
 			return Condition{}, err
 		}
 	}
 
 	return condition, nil
+}
+
+func (e *extractor) applyBindingOption(
+	condition *Condition,
+	option goBindingOption,
+	call *ast.CallExpr,
+	typeArgs []ast.Expr,
+	imports goBindingImports,
+	binding *goBinding,
+) error {
+	_ = typeArgs
+	switch option.Target {
+	case "interface.spec":
+		spec, err := e.parseBindingSpec(option, call)
+		if err != nil {
+			return err
+		}
+		condition.Interface.Spec = &spec
+		return nil
+	case "interface.operations[]":
+		operation, err := e.parseBindingOperation(option, call, imports, binding)
+		if err != nil {
+			return err
+		}
+		condition.Interface.Operations = append(condition.Interface.Operations, operation)
+		return nil
+	case "interface.type":
+		condition.Interface.Type = option.Value
+		if option.EngineArg != nil {
+			if *option.EngineArg >= len(call.Args) {
+				return fmt.Errorf("%s requires an engine argument", option.Function)
+			}
+			engine, ok := e.bindingValue(call.Args[*option.EngineArg], imports, binding)
+			if !ok {
+				return fmt.Errorf("%s engine must be a string literal, string const, or binding constant", option.Function)
+			}
+			condition.Interface.Engine = engine
+		}
+		return nil
+	case "configuration.env[]":
+		env, err := e.parseBindingEnvInput(option, call, imports, binding)
+		if err != nil {
+			return err
+		}
+		if condition.Configuration != nil && len(condition.Configuration.Alternatives) > 0 {
+			return fmt.Errorf("%s cannot be combined with configuration alternatives", option.Function)
+		}
+		if condition.Configuration == nil {
+			condition.Configuration = &Configuration{}
+		}
+		condition.Configuration.Env = append(condition.Configuration.Env, env)
+		return nil
+	case "configuration.alternatives[]":
+		alternative, err := e.parseBindingEnvAlternative(option, call, imports, binding)
+		if err != nil {
+			return err
+		}
+		if condition.Configuration != nil && len(condition.Configuration.Env) > 0 {
+			return fmt.Errorf("%s cannot be combined with configuration env", option.Function)
+		}
+		if condition.Configuration == nil {
+			condition.Configuration = &Configuration{}
+		}
+		condition.Configuration.Alternatives = append(condition.Configuration.Alternatives, alternative)
+		return nil
+	case "requestBodySchema", "responseSchema":
+		return fmt.Errorf("%s is only valid as an operation option", option.Function)
+	default:
+		value, err := e.bindingOptionValue(option, call, imports, binding)
+		if err != nil {
+			return err
+		}
+		return applyBindingValue(condition, option.Target, value)
+	}
+}
+
+func (e *extractor) parseBindingSpec(option goBindingOption, call *ast.CallExpr) (APISpec, error) {
+	format, err := e.bindingStringArg(call, option, "format", true)
+	if err != nil {
+		return APISpec{}, err
+	}
+	uri, err := e.bindingStringArg(call, option, "uri", true)
+	if err != nil {
+		return APISpec{}, err
+	}
+	version, err := e.bindingStringArg(call, option, "version", false)
+	if err != nil {
+		return APISpec{}, err
+	}
+	return APISpec{Format: format, URI: uri, Version: version}, nil
+}
+
+func (e *extractor) parseBindingOperation(option goBindingOption, call *ast.CallExpr, imports goBindingImports, binding *goBinding) (Operation, error) {
+	path, err := e.bindingStringArg(call, option, "path", true)
+	if err != nil {
+		return Operation{}, err
+	}
+	operation := Operation{Method: option.Method, Path: path}
+	for _, arg := range call.Args[1:] {
+		subcall, ok := unparen(arg).(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		suboption, typeArgs, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		if !ok {
+			continue
+		}
+		if err := e.applyBindingOperationOption(&operation, suboption, typeArgs); err != nil {
+			return Operation{}, err
+		}
+	}
+	return operation, nil
+}
+
+func (e *extractor) applyBindingOperationOption(operation *Operation, option goBindingOption, typeArgs []ast.Expr) error {
+	if option.TypeArg == nil {
+		return fmt.Errorf("%s requires typeArg in binding manifest", option.Function)
+	}
+	if *option.TypeArg >= len(typeArgs) {
+		return fmt.Errorf("%s requires a type argument", option.Function)
+	}
+	schema, err := e.schemaForType(typeArgs[*option.TypeArg])
+	if err != nil {
+		return err
+	}
+	switch option.Target {
+	case "requestBodySchema":
+		operation.RequestBodySchema = schema
+	case "responseSchema":
+		operation.ResponseSchema = schema
+	default:
+		return fmt.Errorf("unsupported operation option target %q", option.Target)
+	}
+	return nil
+}
+
+func (e *extractor) parseBindingEnvAlternative(option goBindingOption, call *ast.CallExpr, imports goBindingImports, binding *goBinding) (ConfigurationAlternative, error) {
+	if len(call.Args) == 0 {
+		return ConfigurationAlternative{}, fmt.Errorf("%s requires at least one env input", option.Function)
+	}
+	alternative := ConfigurationAlternative{}
+	for _, arg := range call.Args {
+		subcall, ok := unparen(arg).(*ast.CallExpr)
+		if !ok {
+			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must be env input calls", option.Function)
+		}
+		suboption, _, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		if !ok || suboption.Target != "configuration.env[]" {
+			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must be env input calls", option.Function)
+		}
+		env, err := e.parseBindingEnvInput(suboption, subcall, imports, binding)
+		if err != nil {
+			return ConfigurationAlternative{}, err
+		}
+		alternative.Env = append(alternative.Env, env)
+	}
+	return alternative, nil
+}
+
+func (e *extractor) parseBindingEnvInput(option goBindingOption, call *ast.CallExpr, imports goBindingImports, binding *goBinding) (EnvInput, error) {
+	property, err := e.bindingStringArg(call, option, "property", true)
+	if err != nil {
+		return EnvInput{}, err
+	}
+	name, err := e.bindingStringArg(call, option, "name", true)
+	if err != nil {
+		return EnvInput{}, err
+	}
+	env := EnvInput{Property: property, Name: name}
+	for _, arg := range call.Args[2:] {
+		subcall, ok := unparen(arg).(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		suboption, _, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		if !ok {
+			continue
+		}
+		if err := applyBindingEnvInputOption(&env, suboption); err != nil {
+			return EnvInput{}, err
+		}
+	}
+	return env, nil
+}
+
+func applyBindingEnvInputOption(env *EnvInput, option goBindingOption) error {
+	switch option.Target {
+	case "env.sensitive":
+		value, err := strconv.ParseBool(option.Value)
+		if err != nil {
+			return fmt.Errorf("%s has invalid boolean value %q", option.Function, option.Value)
+		}
+		env.Sensitive = value
+	case "env.required":
+		value, err := strconv.ParseBool(option.Value)
+		if err != nil {
+			return fmt.Errorf("%s has invalid boolean value %q", option.Function, option.Value)
+		}
+		env.Required = &value
+	default:
+		return fmt.Errorf("unsupported env input option target %q", option.Target)
+	}
+	return nil
+}
+
+func (e *extractor) bindingStringArg(call *ast.CallExpr, option goBindingOption, name string, required bool) (string, error) {
+	index, ok := option.StringArgs[name]
+	if !ok {
+		if required {
+			return "", fmt.Errorf("%s binding is missing stringArgs.%s", option.Function, name)
+		}
+		return "", nil
+	}
+	if index >= len(call.Args) {
+		if required {
+			return "", fmt.Errorf("%s requires %s argument", option.Function, name)
+		}
+		return "", nil
+	}
+	value, ok := e.stringValue(call.Args[index])
+	if !ok {
+		return "", fmt.Errorf("%s %s must be a string literal or string const", option.Function, name)
+	}
+	return value, nil
+}
+
+func (e *extractor) bindingOptionValue(option goBindingOption, call *ast.CallExpr, imports goBindingImports, binding *goBinding) (string, error) {
+	if option.Value != "" {
+		return option.Value, nil
+	}
+	if option.ValueArg == nil {
+		return "", fmt.Errorf("%s binding must declare value or valueArg", option.Function)
+	}
+	if *option.ValueArg >= len(call.Args) {
+		return "", fmt.Errorf("%s requires a value argument", option.Function)
+	}
+	value, ok := e.bindingValue(call.Args[*option.ValueArg], imports, binding)
+	if !ok {
+		return "", fmt.Errorf("%s value must be a string literal, string const, or binding constant", option.Function)
+	}
+	return value, nil
 }
 
 func cloneConfiguration(config *Configuration) *Configuration {
@@ -1010,95 +1139,6 @@ func (d goBindingDeclaration) displayName() string {
 		return d.Method
 	}
 	return "declaration"
-}
-
-func (e *extractor) applyConfigurationOption(condition *Condition, optionName string, call *ast.CallExpr, imports importSet) (bool, error) {
-	switch optionName {
-	case "Env":
-		env, err := e.parseEnvInput(call, imports)
-		if err != nil {
-			return true, err
-		}
-		if condition.Configuration != nil && len(condition.Configuration.Alternatives) > 0 {
-			return true, fmt.Errorf("Env cannot be combined with EnvAlternative")
-		}
-		if condition.Configuration == nil {
-			condition.Configuration = &Configuration{}
-		}
-		condition.Configuration.Env = append(condition.Configuration.Env, env)
-		return true, nil
-	case "EnvAlternative":
-		alternative, err := e.parseEnvAlternative(call, imports)
-		if err != nil {
-			return true, err
-		}
-		if condition.Configuration != nil && len(condition.Configuration.Env) > 0 {
-			return true, fmt.Errorf("EnvAlternative cannot be combined with Env")
-		}
-		if condition.Configuration == nil {
-			condition.Configuration = &Configuration{}
-		}
-		condition.Configuration.Alternatives = append(condition.Configuration.Alternatives, alternative)
-		return true, nil
-	default:
-		return false, nil
-	}
-}
-
-func (e *extractor) parseEnvAlternative(call *ast.CallExpr, imports importSet) (ConfigurationAlternative, error) {
-	if len(call.Args) == 0 {
-		return ConfigurationAlternative{}, fmt.Errorf("EnvAlternative requires at least one Env")
-	}
-	alternative := ConfigurationAlternative{}
-	for _, arg := range call.Args {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			return ConfigurationAlternative{}, fmt.Errorf("EnvAlternative arguments must be Env calls")
-		}
-		optionName, _, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok || optionName != "Env" {
-			return ConfigurationAlternative{}, fmt.Errorf("EnvAlternative arguments must be Env calls")
-		}
-		env, err := e.parseEnvInput(subcall, imports)
-		if err != nil {
-			return ConfigurationAlternative{}, err
-		}
-		alternative.Env = append(alternative.Env, env)
-	}
-	return alternative, nil
-}
-
-func (e *extractor) parseEnvInput(call *ast.CallExpr, imports importSet) (EnvInput, error) {
-	if len(call.Args) < 2 {
-		return EnvInput{}, fmt.Errorf("Env requires property and name")
-	}
-	property, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return EnvInput{}, fmt.Errorf("Env property must be a string literal or string const")
-	}
-	name, ok := e.stringValue(call.Args[1])
-	if !ok {
-		return EnvInput{}, fmt.Errorf("Env name must be a string literal or string const")
-	}
-	env := EnvInput{Property: property, Name: name}
-	for _, arg := range call.Args[2:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, _, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok {
-			continue
-		}
-		switch optionName {
-		case "Sensitive":
-			env.Sensitive = true
-		case "Optional":
-			required := false
-			env.Required = &required
-		}
-	}
-	return env, nil
 }
 
 func (e *extractor) bindingValue(expr ast.Expr, imports goBindingImports, expected *goBinding) (string, bool) {
@@ -1139,226 +1179,6 @@ func applyBindingValue(condition *Condition, target string, value string) error 
 		return fmt.Errorf("unsupported binding target %q", target)
 	}
 	return nil
-}
-
-func (e *extractor) parseAPI(call *ast.CallExpr, imports importSet) (Condition, error) {
-	if len(call.Args) == 0 {
-		return Condition{}, fmt.Errorf("API requires a name")
-	}
-	name, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Condition{}, fmt.Errorf("API name must be a string literal or string const")
-	}
-
-	condition := Condition{
-		Name: name,
-		Kind: "api",
-		Interface: Interface{
-			Type: "http",
-		},
-	}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, typeArgs, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok {
-			continue
-		}
-
-		if handled, err := e.applyConfigurationOption(&condition, optionName, subcall, imports); handled {
-			if err != nil {
-				return Condition{}, err
-			}
-			continue
-		}
-
-		switch {
-		case isHTTPMethod(optionName):
-			operation, err := e.parseOperation(optionName, subcall, imports)
-			if err != nil {
-				return Condition{}, err
-			}
-			condition.Interface.Operations = append(condition.Interface.Operations, operation)
-		case optionName == "Spec":
-			spec, err := e.parseSpec(subcall)
-			if err != nil {
-				return Condition{}, err
-			}
-			condition.Interface.Spec = &spec
-		case optionName == "Request" || optionName == "Response":
-			if len(condition.Interface.Operations) == 0 {
-				return Condition{}, fmt.Errorf("%s must follow an HTTP operation", optionName)
-			}
-			if len(typeArgs) != 1 {
-				return Condition{}, fmt.Errorf("%s requires exactly one type argument", optionName)
-			}
-			schema, err := e.schemaForType(typeArgs[0])
-			if err != nil {
-				return Condition{}, err
-			}
-			last := &condition.Interface.Operations[len(condition.Interface.Operations)-1]
-			if optionName == "Request" {
-				last.RequestBodySchema = schema
-			} else {
-				last.ResponseSchema = schema
-			}
-		}
-	}
-
-	if condition.Interface.Spec == nil && len(condition.Interface.Operations) == 0 {
-		return Condition{}, fmt.Errorf("API requires at least one Spec or HTTP operation")
-	}
-	return condition, nil
-}
-
-func (e *extractor) parseOperation(method string, call *ast.CallExpr, imports importSet) (Operation, error) {
-	if len(call.Args) == 0 {
-		return Operation{}, fmt.Errorf("%s requires a path", method)
-	}
-	path, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Operation{}, fmt.Errorf("%s path must be a string literal or string const", method)
-	}
-
-	operation := Operation{
-		Method: method,
-		Path:   path,
-	}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, typeArgs, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok || (optionName != "Request" && optionName != "Response") {
-			continue
-		}
-		if len(typeArgs) != 1 {
-			return Operation{}, fmt.Errorf("%s requires exactly one type argument", optionName)
-		}
-		schema, err := e.schemaForType(typeArgs[0])
-		if err != nil {
-			return Operation{}, err
-		}
-		if optionName == "Request" {
-			operation.RequestBodySchema = schema
-		} else {
-			operation.ResponseSchema = schema
-		}
-	}
-
-	return operation, nil
-}
-
-func (e *extractor) parseSpec(call *ast.CallExpr) (APISpec, error) {
-	if len(call.Args) < 2 {
-		return APISpec{}, fmt.Errorf("Spec requires format and URI")
-	}
-	format, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return APISpec{}, fmt.Errorf("Spec format must be a string literal or string const")
-	}
-	uri, ok := e.stringValue(call.Args[1])
-	if !ok {
-		return APISpec{}, fmt.Errorf("Spec URI must be a string literal or string const")
-	}
-	spec := APISpec{Format: format, URI: uri}
-	if len(call.Args) > 2 {
-		version, ok := e.stringValue(call.Args[2])
-		if !ok {
-			return APISpec{}, fmt.Errorf("Spec version must be a string literal or string const")
-		}
-		spec.Version = version
-	}
-	return spec, nil
-}
-
-func (e *extractor) parseDatastore(call *ast.CallExpr, imports importSet) (Condition, error) {
-	if len(call.Args) == 0 {
-		return Condition{}, fmt.Errorf("Datastore requires a name")
-	}
-	name, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Condition{}, fmt.Errorf("Datastore name must be a string literal or string const")
-	}
-	condition := Condition{Name: name, Kind: "datastore"}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, _, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok {
-			continue
-		}
-		if handled, err := e.applyConfigurationOption(&condition, optionName, subcall, imports); handled {
-			if err != nil {
-				return Condition{}, err
-			}
-			continue
-		}
-		switch optionName {
-		case "Relational":
-			condition.Interface.Type = "relational"
-			if len(subcall.Args) > 0 {
-				condition.Interface.Engine = e.engineValue(subcall.Args[0], imports)
-			}
-		case "Document":
-			condition.Interface.Type = "document"
-			if len(subcall.Args) > 0 {
-				condition.Interface.Engine = e.engineValue(subcall.Args[0], imports)
-			}
-		}
-	}
-
-	if condition.Interface.Type == "" {
-		return Condition{}, fmt.Errorf("Datastore requires Relational or Document")
-	}
-	return condition, nil
-}
-
-func (e *extractor) parseCache(call *ast.CallExpr, imports importSet) (Condition, error) {
-	if len(call.Args) == 0 {
-		return Condition{}, fmt.Errorf("Cache requires a name")
-	}
-	name, ok := e.stringValue(call.Args[0])
-	if !ok {
-		return Condition{}, fmt.Errorf("Cache name must be a string literal or string const")
-	}
-	condition := Condition{Name: name, Kind: "cache"}
-
-	for _, arg := range call.Args[1:] {
-		subcall, ok := unparen(arg).(*ast.CallExpr)
-		if !ok {
-			continue
-		}
-		optionName, _, ok := callNameAndTypeArgs(subcall, imports)
-		if !ok {
-			continue
-		}
-		if handled, err := e.applyConfigurationOption(&condition, optionName, subcall, imports); handled {
-			if err != nil {
-				return Condition{}, err
-			}
-			continue
-		}
-		if optionName == "KeyValue" {
-			condition.Interface.Type = "key_value"
-			if len(subcall.Args) > 0 {
-				condition.Interface.Engine = e.engineValue(subcall.Args[0], imports)
-			}
-		}
-	}
-
-	if condition.Interface.Type == "" {
-		return Condition{}, fmt.Errorf("Cache requires KeyValue")
-	}
-	return condition, nil
 }
 
 func (e *extractor) schemaForType(expr ast.Expr) (any, error) {
@@ -1483,59 +1303,6 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 	}
 	value, err := strconv.Unquote(lit.Value)
 	return value, err == nil
-}
-
-func (e *extractor) engineValue(expr ast.Expr, imports importSet) string {
-	if value, ok := e.stringValue(expr); ok {
-		return value
-	}
-	switch typed := unparen(expr).(type) {
-	case *ast.SelectorExpr:
-		if ident, ok := unparen(typed.X).(*ast.Ident); ok && imports.aliases[ident.Name] {
-			return engineName(typed.Sel.Name)
-		}
-	case *ast.Ident:
-		if imports.dot {
-			return engineName(typed.Name)
-		}
-	}
-	return ""
-}
-
-func engineName(name string) string {
-	switch name {
-	case "Postgres":
-		return "postgres"
-	case "MySQL":
-		return "mysql"
-	case "MariaDB":
-		return "mariadb"
-	case "SQLServer":
-		return "sqlserver"
-	case "Oracle":
-		return "oracle"
-	case "SQLite":
-		return "sqlite"
-	case "MongoDB":
-		return "mongodb"
-	case "Couchbase":
-		return "couchbase"
-	case "Redis":
-		return "redis"
-	case "Memcached":
-		return "memcached"
-	default:
-		return strings.ToLower(name)
-	}
-}
-
-func isHTTPMethod(name string) bool {
-	switch name {
-	case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE":
-		return true
-	default:
-		return false
-	}
 }
 
 func sortedExtensions(extensions map[string]bool) []string {

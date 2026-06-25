@@ -5,16 +5,20 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-func TestExtractDirWithAliasedImport(t *testing.T) {
+func TestExtractDirWithEnvConfigurationFacade(t *testing.T) {
 	dir := t.TempDir()
+	envPath := extensionModulePath(t, "env-configuration")
+	writeModule(t, dir, map[string]string{
+		"github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go": envPath,
+	})
+
 	source := `package main
 
-import (
-	common "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
-	env "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
-)
+import rc "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
 
 const (
 	todoPath = "/todos"
@@ -32,16 +36,16 @@ type Todo struct {
 	Completed bool ` + "`json:\"completed\"`" + `
 }
 
-var _ = common.API("todos-api",
-	common.POST(todoPath, common.Request[CreateTodoRequest](), common.Response[Todo]()),
-	env.Env("baseUrl", "TODOS_API_URL"),
+var _ = rc.API("todos-api",
+	rc.POST(todoPath, rc.Request[CreateTodoRequest](), rc.Response[Todo]()),
+	rc.Env("baseUrl", "TODOS_API_URL"),
 )
 
-var _ = common.Datastore("primary-db", common.Relational(common.MySQL))
-var _ = common.Cache("todo-cache",
-	common.KeyValue(common.Redis),
-	env.EnvAlternative(env.Env("url", "REDIS_URL")),
-	env.EnvAlternative(env.Env("hostname", "REDIS_HOST"), env.Env("port", "REDIS_PORT")),
+var _ = rc.Datastore("primary-db", rc.Relational(rc.MySQL))
+var _ = rc.Cache("todo-cache",
+	rc.KeyValue(rc.Redis),
+	rc.EnvAlternative(rc.Env("url", "REDIS_URL")),
+	rc.EnvAlternative(rc.Env("hostname", "REDIS_HOST"), rc.Env("port", "REDIS_PORT")),
 )
 `
 
@@ -58,8 +62,15 @@ var _ = common.Cache("todo-cache",
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/common-integrations:v1alpha1", "https://runtimeconditions.io/extensions/env-configuration:v1alpha1"}) {
+	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/env-configuration:v1alpha1"}) {
 		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
+	}
+	resolvedExtensions := resolveExtensionsForTest(t, profile.Extensions, map[string]string{
+		"https://runtimeconditions.io/extensions/env-configuration:v1alpha1":   filepath.Join(envPath, "..", "env-configuration-v1alpha1.yaml"),
+		"https://runtimeconditions.io/extensions/common-integrations:v1alpha1": filepath.Join(envPath, "..", "..", "common-integrations", "common-integrations-v1alpha1.yaml"),
+	})
+	if !slices.Contains(resolvedExtensions, "https://runtimeconditions.io/extensions/common-integrations:v1alpha1") {
+		t.Fatalf("resolved extensions do not include common integrations: %#v", resolvedExtensions)
 	}
 	if len(profile.Conditions) != 3 {
 		t.Fatalf("expected 3 conditions, got %d", len(profile.Conditions))
@@ -92,6 +103,48 @@ var _ = common.Cache("todo-cache",
 		t.Fatalf("unexpected cache configuration: %#v", cache.Configuration)
 	}
 
+}
+
+func TestExtractDirWithCommonIntegrationsOnly(t *testing.T) {
+	dir := t.TempDir()
+	commonPath := extensionModulePath(t, "common-integrations")
+	writeModule(t, dir, map[string]string{
+		"github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go": commonPath,
+	})
+
+	source := `package main
+
+import common "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
+
+var _ = common.Cache("todo-cache", common.KeyValue(common.Redis))
+`
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := ExtractDir(dir, Options{
+		Name:            "todos",
+		WorkloadURI:     "github.com/example/todos",
+		WorkloadVersion: "v0.1.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/common-integrations:v1alpha1"}) {
+		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
+	}
+	if len(profile.Conditions) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(profile.Conditions))
+	}
+	condition := profile.Conditions[0]
+	if condition.Kind != "cache" || condition.Interface.Type != "key_value" || condition.Interface.Engine != "redis" {
+		t.Fatalf("unexpected condition: %#v", condition)
+	}
+	if condition.Configuration != nil {
+		t.Fatalf("common-only condition should not include env configuration: %#v", condition.Configuration)
+	}
 }
 
 func TestExtractDirWithThirdPartyPackageManifest(t *testing.T) {
@@ -140,7 +193,7 @@ func writeAuditLog(ctx context.Context) error {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(profile.Extensions, []string{"https://aws.example.com/runtimeconditions/object-store:v1alpha1", "https://runtimeconditions.io/extensions/env-configuration:v1alpha1"}) {
+	if !slices.Equal(profile.Extensions, []string{"https://aws.example.com/runtimeconditions/object-store:v1alpha1"}) {
 		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
 	}
 	if len(profile.Conditions) != 1 {
@@ -160,4 +213,69 @@ func writeAuditLog(ctx context.Context) error {
 	if condition.Configuration.Env[2].Name != "AWS_ACCESS_KEY_ID" || !condition.Configuration.Env[2].Sensitive {
 		t.Fatalf("unexpected credential configuration: %#v", condition.Configuration.Env[2])
 	}
+}
+
+func extensionModulePath(t *testing.T, name string) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "..", "extensions", name, "go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeModule(t *testing.T, dir string, replacements map[string]string) {
+	t.Helper()
+	content := "module github.com/example/testapp\n\ngo 1.25.0\n\nrequire (\n"
+	for module := range replacements {
+		content += "\t" + module + " v0.0.0\n"
+	}
+	content += ")\n\n"
+	for module, replacement := range replacements {
+		content += "replace " + module + " => " + replacement + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func resolveExtensionsForTest(t *testing.T, roots []string, definitions map[string]string) []string {
+	t.Helper()
+	seen := make(map[string]bool)
+	var visit func(string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, dependency := range extensionDependencies(t, definitions[id]) {
+			visit(dependency)
+		}
+	}
+	for _, root := range roots {
+		visit(root)
+	}
+	resolved := make([]string, 0, len(seen))
+	for id := range seen {
+		resolved = append(resolved, id)
+	}
+	slices.Sort(resolved)
+	return resolved
+}
+
+func extensionDependencies(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Spec struct {
+			Dependencies []string `yaml:"dependencies"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	return document.Spec.Dependencies
 }

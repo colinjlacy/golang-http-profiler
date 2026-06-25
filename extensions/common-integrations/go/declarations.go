@@ -33,6 +33,12 @@ type OperationOption interface {
 	CommonIntegrationsOperationOption()
 }
 
+// SchemaOption configures an API declaration or operation with a schema.
+type SchemaOption interface {
+	APIOption
+	OperationOption
+}
+
 type apiOption struct{}
 
 func (apiOption) CommonIntegrationsAPIOption() {}
@@ -97,12 +103,12 @@ func TRACE(path string, options ...OperationOption) APIOption {
 }
 
 // Request attaches a request body schema based on T.
-func Request[T any]() schemaOption {
+func Request[T any]() SchemaOption {
 	return schemaOption{}
 }
 
 // Response attaches a response body schema based on T.
-func Response[T any]() schemaOption {
+func Response[T any]() SchemaOption {
 	return schemaOption{}
 }
 
