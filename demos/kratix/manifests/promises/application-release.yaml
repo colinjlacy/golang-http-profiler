@@ -75,7 +75,7 @@ spec:
         - apiVersion: platform.kratix.io/v1alpha1
           kind: Pipeline
           metadata:
-            name: configure-application-release
+            name: resolve
           spec:
             rbac:
               permissions:
