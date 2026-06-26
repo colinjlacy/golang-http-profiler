@@ -1,29 +1,27 @@
-# Go Runtime Conditions AST Profiler
+# Go Runtime Conditions
 
-This tree contains the Go implementation of declaration-code Runtime Conditions Profile generation.
+This tree contains the maintained Go AST profiler module.
 
 ## Layout
 
-- `runtimeconditions/`: typed no-op declaration library.
-- `profiler/extractor/`: Go AST extractor.
-- `profiler/`: CLI for generating Runtime Conditions Profile YAML.
-- `apps/`: sample Go services.
-- `docker-compose.yml`: Go sample service stack.
+- `profiler/`: CLI module for generating Runtime Conditions Profile YAML.
+- `profiler/extractor/`: Go AST extractor used by the CLI.
+
+First-party Go declaration packages live beside their extension definitions under `extensions/*/go`. Demo applications live under `demos/apps`.
 
 ## Generate a Profile
 
 ```sh
-go run ./profiler -dir ./apps/traffic -name traffic-generator
-```
-
-## Run Samples
-
-```sh
-docker compose up
+cd profiler
+go run . \
+  -dir ../../demos/apps/request-logger-http \
+  -name request-logger-http \
+  -workload-version dev
 ```
 
 ## Test
 
 ```sh
+cd profiler
 go test ./...
 ```

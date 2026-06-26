@@ -81,7 +81,7 @@ The package MAY include one or more language-specific sections. A generator igno
 
 # 3. Go Section
 
-The current demo implements a Go section.
+The current example implements a Go section.
 
 ```yaml
 go:

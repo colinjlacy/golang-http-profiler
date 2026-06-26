@@ -15,7 +15,7 @@
     if (
       trimmed.startsWith("cd ") ||
       trimmed.startsWith("kubectl ") ||
-      trimmed.startsWith("platform/scripts/")
+      trimmed.startsWith("demos/kratix/scripts/")
     ) {
       return "shell";
     }

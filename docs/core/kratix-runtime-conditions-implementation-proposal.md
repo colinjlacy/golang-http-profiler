@@ -57,14 +57,14 @@ Those are important, but they should come after the first executable proof.
 The target outcome is a repeatable demo command that deploys a real application to Kubernetes through Kratix:
 
 ```bash
-rc deploy ./go/apps/request-logger \
+rc deploy ./demos/apps/request-logger-http \
   --image ghcr.io/example/request-logger:dev \
   --namespace demo
 ```
 
 That command should:
 
-1. run the Go or Python AST profiler
+1. run the Go AST profiler
 2. generate a Runtime Conditions Profile
 3. create or update a Kratix `ApplicationRelease` resource request
 4. wait for Kratix workflow completion
@@ -449,11 +449,9 @@ The application should not be deployed with a known incompatible API contract.
 ## Proposed Repository Layout
 
 ```text
-platform/
+demos/
   README.md
   kratix/
-    install/
-      quickstart.md
     promises/
       redis/
         promise.yaml
@@ -470,25 +468,18 @@ platform/
       todos-api.catalog-info.yaml
       todos.openapi.yaml
       todos.openapi.breaking.yaml
-  demo/
-    provider/
-      todos-api/
-        main.go
-        Dockerfile
-        k8s.yaml
-    consumer/
-      go/
-        main.go
-        Dockerfile
-      python/
-        main.py
-        Dockerfile
-    scripts/
-      smoke-test.sh
-      break-openapi.sh
+  apps/
+    todos-api/
+      main.go
+      Dockerfile
+      k8s.yaml
+    request-logger-http/
+      main.go
+      conditions.go
+      Dockerfile
 ```
 
-The existing Go and Python profilers can stay in their language-specific trees. The new `platform/` tree should contain the Kratix-specific implementation and demo assets.
+The Go profiler stays in `go/profiler`. Kratix-specific implementation and demo assets live under `demos/kratix`.
 
 ## CLI Responsibilities
 
@@ -496,8 +487,8 @@ The `rc deploy` command should be a thin automation wrapper around existing tool
 
 It should:
 
-1. detect Go or Python source
-2. run the correct AST profiler
+1. detect Go source
+2. run the Go AST profiler
 3. produce the Runtime Conditions Profile
 4. create the `ApplicationRelease` request
 5. apply it with `kubectl`

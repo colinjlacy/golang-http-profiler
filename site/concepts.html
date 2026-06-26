@@ -12,7 +12,7 @@
         <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
         <nav class="top-links" aria-label="Top links">
           <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/docs/fifth-draft.md">Current Draft</a>
-          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/platform/README.md">Run Demo</a>
+          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/README.md">Run Demo</a>
           <a href="reference.html">Source Map</a>
         </nav>
       </div>
@@ -80,7 +80,7 @@ conditions:
         <section class="section">
           <h2>Fulfillment outside the profile</h2>
           <p class="short">
-            The previous profile only says the workload needs a Redis-compatible cache and can consume it through <code>REDIS_URL</code> or <code>REDIS_HOST</code> plus <code>REDIS_PORT</code>. Before Kubernetes can inject <code>REDIS_URL</code>, an adapter has to satisfy that Condition by provisioning Redis or granting access to an existing Redis cache.
+            The profile says the workload needs a Redis-compatible cache and can consume it through <code>REDIS_URL</code> or <code>REDIS_HOST</code> plus <code>REDIS_PORT</code>. Before Kubernetes can inject <code>REDIS_URL</code>, an adapter has to satisfy that Condition by provisioning Redis or granting access to an existing Redis cache.
           </p>
           <ol class="step-list" aria-label="Redis fulfillment steps">
             <li>

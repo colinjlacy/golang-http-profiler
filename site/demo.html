@@ -12,7 +12,7 @@
         <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
         <nav class="top-links" aria-label="Top links">
           <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/docs/fifth-draft.md">Current Draft</a>
-          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/platform/README.md">Run Demo</a>
+          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/README.md">Run Demo</a>
           <a href="reference.html">Source Map</a>
         </nav>
       </div>
@@ -35,21 +35,20 @@
 
       <main class="content">
         <p class="chapter-label">Chapter 6</p>
-        <h1 class="page-title">The repo includes a complete working demo.</h1>
+        <h1 class="page-title">The repo includes demo apps and adapter assets.</h1>
         <p class="intro">
-          The demo installs Kratix Promises, generates a profile from Go source, validates an API contract, provisions Redis and S3, and deploys the workload with Cilium policies.
+          Generate a Runtime Conditions Profile from the Go request logger source, then use the demo apps and adapter assets to exercise validation and fulfillment workflows.
         </p>
 
         <section class="section">
-          <h2>Prerequisite AWS admin Secret</h2>
+          <h2>Request logger app</h2>
           <div class="example">
             <div class="example-title">
-              <span>Needed before S3 provisioning</span>
-              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/platform/README.md">platform README</a>
+              <span>Standalone Go app module</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/README.md">demos README</a>
             </div>
-            <pre><code>kubectl -n kratix-platform-system create secret generic aws-admin-credentials \
-  --from-literal=ACCESS_KEY_ID=&lt;aws-access-key-id&gt; \
-  --from-literal=SECRET_ACCESS_KEY=&lt;aws-secret-access-key&gt;</code></pre>
+            <pre><code>cd demos/apps/request-logger-http
+go test ./...</code></pre>
           </div>
         </section>
 
@@ -57,22 +56,20 @@
           <h2>Run path</h2>
           <div class="example">
             <div class="example-title">From the repository root</div>
-            <pre><code>platform/scripts/00-check-prereqs.sh
-platform/scripts/01-install-kratix.sh
-platform/scripts/02-use-ghcr-images.sh
-platform/scripts/03-install-promises.sh
-platform/scripts/04-deploy-catalog-and-provider.sh
-platform/scripts/05-rc-deploy.sh
-platform/scripts/06-smoke-test.sh</code></pre>
+            <pre><code>cd go/profiler
+go run . \
+  -dir ../../demos/apps/request-logger-http \
+  -name request-logger-http \
+  -workload-version dev</code></pre>
           </div>
         </section>
 
         <section class="section">
           <h2>What should happen</h2>
           <ol class="step-list">
-            <li><span class="step-num">1</span><div><strong>Generator emits profile</strong><span>API, Redis, and S3 Conditions are discovered from source and SDK metadata.</span></div></li>
+            <li><span class="step-num">1</span><div><strong>Generator emits profile</strong><span>API and Redis Conditions are discovered from explicit source declarations.</span></div></li>
             <li><span class="step-num">2</span><div><strong>Adapter validates API</strong><span>The declared `GET /todos/{id}` operation is checked against the catalog OpenAPI document.</span></div></li>
-            <li><span class="step-num">3</span><div><strong>Promises fulfill dependencies</strong><span>Redis runs in-cluster; S3Bucket creates real AWS S3 and IAM credentials.</span></div></li>
+            <li><span class="step-num">3</span><div><strong>Promises fulfill dependencies</strong><span>Provider outputs satisfy the environment mappings declared in the profile.</span></div></li>
             <li><span class="step-num">4</span><div><strong>Workload receives env and policy</strong><span>Deployment env refs and Cilium policies are rendered from provider outputs.</span></div></li>
           </ol>
         </section>
@@ -81,7 +78,7 @@ platform/scripts/06-smoke-test.sh</code></pre>
           <h2>Breaking contract check</h2>
           <div class="example">
             <div class="example-title">The adapter should fail before writing the Deployment</div>
-            <pre><code>platform/scripts/07-demo-breaking-change.sh</code></pre>
+            <pre><code>Use demos/catalog/apis/todos.openapi.breaking.yaml as the catalog input for the adapter.</code></pre>
           </div>
         </section>
 

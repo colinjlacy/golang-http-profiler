@@ -47,80 +47,55 @@ The current Go demo generator performs these steps:
 
 The generator does not need `-extensions-root` for package manifests shipped by imported SDK packages.
 
-The `-extensions-root` flag remains useful for local extension catalogs and legacy binding manifests, but SDK package manifests are discovered from imports.
+The `-extensions-root` flag is useful for local extension catalogs and manifests loaded from explicit extension roots, while SDK package manifests are discovered from imports.
 
 ---
 
 # 3. Demo Walkthrough
 
-The demo workload imports a local SDK package:
+The current request logger demo imports explicit first-party declaration packages:
 
 ```go
-import "github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3"
+import (
+	common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+	env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)
 ```
 
-The workload calls the SDK normally:
+The workload declares an HTTP API and Redis cache:
 
 ```go
-func writeAuditLog(ctx context.Context, event string) error {
-	bucket := os.Getenv("AUDIT_LOG_BUCKET")
-	if bucket == "" {
-		return errors.New("AUDIT_LOG_BUCKET is not set")
-	}
-	client := s3.NewFromConfig(s3.Config{})
-	_, err := client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: stringPtr(bucket),
-		Key:    stringPtr("request-logger/demo.json"),
-		Body:   strings.NewReader(event),
-	})
-	return err
-}
-```
+common.API("todos-api",
+	common.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
+	common.GET("/todos/{id}", common.Response[Todo]()),
+	env.Env("baseUrl", "TODOS_API_URL"),
+)
 
-The SDK package includes:
-
-```text
-demo/aws-sdk-go-v2/service/s3/
-  client.go
-  runtimeconditions.package.yaml
-  aws-object-store-v1alpha1.yaml
-```
-
-The package manifest maps `Client.PutObject` to:
-
-```yaml
-kind: aws.object_store
-interfaceType: aws.s3
-configuration:
-  env:
-    - property: bucket
-      name: AUDIT_LOG_BUCKET
-    - property: region
-      name: AWS_REGION
-    - property: accessKeyId
-      name: AWS_ACCESS_KEY_ID
-      sensitive: true
-    - property: secretAccessKey
-      name: AWS_SECRET_ACCESS_KEY
-      sensitive: true
+common.Cache("request-cache",
+	common.KeyValue(common.Redis),
+	env.EnvAlternative(env.Env("url", "REDIS_URL")),
+	env.EnvAlternative(
+		env.Env("hostname", "REDIS_HOST"),
+		env.Env("port", "REDIS_PORT"),
+	),
+)
 ```
 
 Running the generator:
 
 ```sh
-cd go
-go run ./profiler \
-  -dir ./apps/request-logger-http \
+cd go/profiler
+go run . \
+  -dir ../../demos/apps/request-logger-http \
   -name request-logger-http \
   -workload-uri github.com/example/request-logger-http \
   -workload-version v0.1.0
 ```
 
-produces a profile that includes both explicit declarations and SDK-discovered Conditions:
+produces a profile that includes the directly used declaration package extensions:
 
 ```yaml
 extensions:
-  - https://aws.example.com/runtimeconditions/object-store:v1alpha1
   - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
   - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
 
@@ -148,26 +123,9 @@ conditions:
               name: REDIS_HOST
             - property: port
               name: REDIS_PORT
-  - name: s3-object-store
-    kind: aws.object_store
-    interface:
-      type: aws.s3
-      bucketClass: standard
-    configuration:
-      env:
-        - property: bucket
-          name: AUDIT_LOG_BUCKET
-        - property: region
-          name: AWS_REGION
-        - property: accessKeyId
-          name: AWS_ACCESS_KEY_ID
-          sensitive: true
-        - property: secretAccessKey
-          name: AWS_SECRET_ACCESS_KEY
-          sensitive: true
 ```
 
-The `todos-api` and `request-cache` Conditions come from explicit `rc` declarations in the workload. The `s3-object-store` Condition comes from normal SDK usage plus the SDK package manifest.
+The `todos-api` and `request-cache` Conditions come from explicit first-party declaration package calls in the workload. A workload that also imports an SDK package with a manifest can emit additional SDK-discovered Conditions from that SDK usage.
 
 The profile records the environment variable names expected by the workload. It does not contain the values for those variables. In the Kratix demo, the runtime-workload adapter maps these requested properties to provider-owned outputs:
 
@@ -175,14 +133,12 @@ The profile records the environment variable names expected by the workload. It 
 | ---- | ---- |
 | `baseUrl` | Literal service URL from the API catalog |
 | `url`, `hostname`, `port` | Redis Promise connection ConfigMap |
-| `bucket`, `region` | S3Bucket Promise connection ConfigMap for the provisioned AWS bucket |
-| `accessKeyId`, `secretAccessKey` | S3Bucket Promise credentials Secret for the generated bucket-scoped IAM access key |
 
 The same adapter emits Cilium policy requests for the resolved workload:
 
 - A `CiliumNamespaceLockdown` request creates namespace default-deny pod networking.
 - A `CiliumAPIAccess` request is emitted for API Conditions that declare HTTP operations. That request contains the workload selector, resolved service or FQDN destination, port, and only the `method` and `path` pairs declared by the Condition.
-- Redis and S3Bucket requests include the workload selector so their Promises can render dependency-specific Cilium policies.
+- Redis requests include the workload selector so their Promises can render dependency-specific Cilium policies.
 
 The generator still emits only the Runtime Conditions Profile. Network-policy requests are adapter output.
 

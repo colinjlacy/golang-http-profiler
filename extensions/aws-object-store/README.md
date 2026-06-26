@@ -8,8 +8,8 @@ This document defines a minimal Runtime Conditions extension for AWS S3-compatib
 
 The machine-readable extension definition is [aws-object-store-v1alpha1.yaml](aws-object-store-v1alpha1.yaml).
 
-The demo SDK package that embeds this extension shape is in
-[../../demo/aws-sdk-go-v2/service/s3](../../demo/aws-sdk-go-v2/service/s3).
+The example SDK package that embeds this extension shape is in
+[../../examples/sdks/aws-sdk-go-v2/service/s3](../../examples/sdks/aws-sdk-go-v2/service/s3).
 
 This extension is treated as a third-party extension. It is not first-party Runtime Conditions vocabulary.
 
@@ -66,7 +66,7 @@ The `configuration` block names workload-facing environment variables only. It d
 
 # 3. SDK Package Manifest Example
 
-The demo SDK package includes a `runtimeconditions.package.yaml` file next to
+The example SDK package includes a `runtimeconditions.package.yaml` file next to
 its S3 client code. That package manifest maps SDK method calls to this
 extension vocabulary:
 
@@ -79,7 +79,7 @@ extension:
   definition: aws-object-store-v1alpha1.yaml
 
 go:
-  importPath: github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   constructors:
     - function: NewFromConfig
       receiver: Client
@@ -110,4 +110,4 @@ The application imports and calls the SDK normally. Runtime Conditions tooling
 reads the package manifest for direct imports and emits the profile condition
 without requiring application code to import a separate declaration package.
 
-In the Kratix demo, the runtime-workload adapter provisions an `S3Bucket` request. The S3Bucket Promise creates a real AWS S3 bucket and a bucket-scoped IAM access key using platform-owned AWS admin credentials. It publishes non-sensitive connection properties through a ConfigMap and sensitive workload credentials through a Secret. The adapter uses the profile's `configuration.env[].name` values to wire those provider outputs into the workload Deployment.
+A downstream adapter can map this profile shape to provider-specific provisioning. For example, an adapter could create an object-storage request, publish non-sensitive connection properties through a ConfigMap, publish sensitive workload credentials through a Secret, and use the profile's `configuration.env[].name` values to wire those outputs into the workload Deployment.

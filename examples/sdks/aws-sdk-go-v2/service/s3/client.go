@@ -1,6 +1,6 @@
-// Package s3 is a minimal local fork of an AWS SDK package for the Runtime
-// Conditions demo. It mirrors the shape of an SDK client and performs the
-// S3 PutObject call needed by the demo without pulling in the full AWS SDK.
+// Package s3 is a minimal local stand-in for an AWS SDK package. It mirrors
+// the shape of an SDK client and performs the S3 PutObject call needed by the
+// package manifest example without pulling in the full AWS SDK.
 package s3
 
 import (

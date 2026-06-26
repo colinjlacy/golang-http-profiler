@@ -11,8 +11,8 @@
       <div class="header-inner">
         <a class="brand" href="index.html"><span class="brand-mark">RC</span> Runtime Conditions</a>
         <nav class="top-links" aria-label="Top links">
-          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/docs/fifth-draft.md">Current Draft</a>
-          <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/platform/README.md">Run Demo</a>
+          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/docs/fifth-draft.md">Current Draft</a>
+          <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/README.md">Run Demo</a>
           <a href="reference.html">Source Map</a>
         </nav>
       </div>
@@ -41,12 +41,12 @@
         </p>
 
         <section class="section">
-          <h2>1. The application imports the declaration package</h2>
+          <h2>1. The application imports declaration packages</h2>
           <p class="short">The declarations are regular Go calls. They are intentionally no-op at runtime, but the generator can identify them in the AST.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/apps/request-logger-http/conditions.go</span>
-              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/go/apps/request-logger-http/conditions.go">source</a>
+              <span>demos/apps/request-logger-http/conditions.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/apps/request-logger-http/conditions.go">source</a>
             </div>
             <pre><code>package main
 
@@ -62,10 +62,10 @@ import (
           <p class="short">The API declaration names the catalog entry, the HTTP operation the workload calls, the expected response shape, and the environment variable the app reads.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/apps/request-logger-http/conditions.go</span>
-              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/go/apps/request-logger-http/conditions.go">source</a>
+              <span>demos/apps/request-logger-http/conditions.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/apps/request-logger-http/conditions.go">source</a>
             </div>
-            <pre><code>func init() {
+            <pre><code>func declaration() {
   common.API("todos-api",
     common.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
     common.GET("/todos/{id}", common.Response[Todo]()),
@@ -89,8 +89,8 @@ import (
           <p class="short">The profile records the names `TODOS_API_URL` and `REDIS_URL`; it does not provide their values. The adapter supplies those later.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/apps/request-logger-http/main.go</span>
-              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/go/apps/request-logger-http/main.go">source</a>
+              <span>demos/apps/request-logger-http/main.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/demos/apps/request-logger-http/main.go">source</a>
             </div>
             <pre><code>func checkTodosAPI(ctx context.Context) error {
   baseURL := strings.TrimRight(os.Getenv("TODOS_API_URL"), "/")
@@ -122,23 +122,33 @@ import (
           <p class="short">This keeps application behavior unchanged. The generator reads calls to these functions; the compiled service just receives inert values.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/runtimeconditions/declarations.go</span>
-              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/go/runtimeconditions/declarations.go">source</a>
+              <span>extensions/common-integrations/go/declarations.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/extensions/common-integrations/go/declarations.go">source</a>
             </div>
             <pre><code>// API declares an external API dependency.
 func API(name string, options ...APIOption) Declaration {
   return Declaration{}
 }
 
-// Env declares that a Condition property is supplied through an
-// environment variable with the provided name.
-func Env(property, name string, options ...EnvOption) ConditionConfigOption {
-  return ConditionConfigOption{}
-}
-
 // Cache declares a cache dependency.
 func Cache(name string, options ...CacheOption) Declaration {
   return Declaration{}
+}</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">
+              <span>extensions/env-configuration/go/declarations.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/extensions/env-configuration/go/declarations.go">source</a>
+            </div>
+            <pre><code>type ConditionOption interface {
+  common.APIOption
+  common.DatastoreOption
+  common.CacheOption
+  envConfigurationConditionOption()
+}
+
+func Env(property, name string, options ...EnvOption) ConditionOption {
+  return conditionOption{}
 }</code></pre>
           </div>
         </section>
@@ -148,9 +158,9 @@ func Cache(name string, options ...CacheOption) Declaration {
           <p class="short">The generator parses the Go AST, finds the declaration calls, resolves their arguments, and emits a Runtime Conditions Profile.</p>
           <div class="example">
             <div class="example-title">Command</div>
-            <pre><code>cd go
-go run ./profiler \
-  -dir ./apps/request-logger-http \
+            <pre><code>cd go/profiler
+go run . \
+  -dir ../../demos/apps/request-logger-http \
   -name request-logger-http \
   -workload-uri github.com/example/request-logger-http \
   -workload-version v0.1.0</code></pre>

@@ -166,7 +166,7 @@ apiVersion: runtimeconditions.io/v1alpha1
 kind: RuntimeConditionsPackage
 
 metadata:
-  package: github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3
+  package: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   language: go
 
 extension:
@@ -174,7 +174,7 @@ extension:
   definition: aws-object-store-v1alpha1.yaml
 
 go:
-  importPath: github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   package: s3
 
   constructors:
@@ -289,10 +289,10 @@ Before publishing Runtime Conditions metadata, SDK authors SHOULD verify:
 
 # 8. Current Demo
 
-The current repository contains a minimal demo SDK package at:
+This repository contains a minimal example SDK package at:
 
 ```text
-demo/aws-sdk-go-v2/service/s3/
+examples/sdks/aws-sdk-go-v2/service/s3/
 ```
 
 It includes:
@@ -303,4 +303,4 @@ runtimeconditions.package.yaml
 aws-object-store-v1alpha1.yaml
 ```
 
-The demo workload imports the SDK normally and calls `Client.PutObject`. The Go generator discovers the package manifest from that import and emits an `aws.object_store` Condition into the generated Runtime Conditions Profile.
+An example workload can import the SDK normally and call `Client.PutObject`. The Go generator discovers the package manifest from that import and emits an `aws.object_store` Condition into the generated Runtime Conditions Profile.

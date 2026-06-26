@@ -2,7 +2,7 @@ apiVersion: runtimeconditions.io/v1alpha1
 kind: RuntimeConditionsPackage
 
 metadata:
-  package: github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3
+  package: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   language: go
 
 extension:
@@ -10,7 +10,7 @@ extension:
   definition: aws-object-store-v1alpha1.yaml
 
 go:
-  importPath: github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   package: s3
 
   constructors:

@@ -1,9 +1,0 @@
-go 1.25.0
-
-use (
-	./ebpf-profiler
-	./extensions/common-integrations/go
-	./extensions/env-configuration/go
-	./go
-	./platform/demo/provider/todos-api
-)

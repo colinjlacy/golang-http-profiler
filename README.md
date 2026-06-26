@@ -1,6 +1,6 @@
 # Runtime Conditions Profilers
 
-Declare your service’s dependencies in code (Go or Python) and automatically generate the configurations needed for deployment. No YAML or manual steps required: just run a command in your CI pipeline to produce a spec that downstream tools (Kubernetes, Cilium, databases, etc.) can consume.
+Declare your service's runtime dependencies in code and generate a Runtime Conditions Profile that downstream tools can consume. The Go AST profiler reads first-party extension declaration packages and emits profile YAML for adapters and validators.
 
 ## The Problem
 
@@ -10,11 +10,11 @@ Downstream tooling is often a patchwork of one-off configurations and fragmented
 
 ## The Proposal
 
-This tool replaces chaos and confusion with a [three-step workflow](https://colinjlacy.github.io/runtime-conditions-profiles/):
+This repository is organized around a [three-step workflow](https://colinjlacy.github.io/runtime-conditions-profiles/):
 
-- The source code uses integrations. For an example, the demo app below calls an HTTP API, Redis, and S3.
+- The source code uses integrations. For an example, the demo app calls an HTTP API and Redis.
 - A generator emits a profile that includes requirements and environment variable names, not target values.
-- An adapter fulfills the profile. The Kratix demo maps Conditions to Redis, S3, Secrets, ConfigMaps, and Cilium policies.
+- An adapter fulfills the profile. The Kratix demo assets map Conditions to platform resources such as Redis, ConfigMaps, Secrets, and network policy.
 
 ## Who Benefits
 
@@ -37,17 +37,20 @@ This tool replaces chaos and confusion with a [three-step workflow](https://coli
 
 ## Contents
 
-This repository contains three separate implementation areas:
+This repository contains:
 
 - `ebpf-profiler/` - the original Linux eBPF runtime observation profiler.
-- `go/` - Go declaration library, Go AST profiler, and Go sample services.
-- `python/` - Python declaration library, Python AST profiler, and Python sample services.
+- `docs/` - the Runtime Conditions Profile specification draft and authoring guides.
+- `extensions/` - first-party extension definitions and their Go declaration packages.
+- `go/profiler/` - the maintained Go AST profile generator.
+- `demos/apps/` - demo workloads used to exercise declaration packages and downstream adapters.
+- `demos/kratix/` - Kratix adapter and Promise demo assets.
+- `examples/sdks/` - SDK packaging examples for package-owned manifests.
 
-The Runtime Conditions Profile specification draft lives in `docs/`. Start with
-`docs/intro.md` for the core spec, extension drafts, and SDK integration guides.
+The Runtime Conditions Profile specification draft lives in `docs/fifth-draft.md`.
 
 The GitHub Pages reader site lives in `site/`. It is a static site that presents
-the current spec, extension model, implementation guides, and end-to-end Kratix
+the spec, extension model, implementation guides, and end-to-end Kratix
 demo as a cohesive reader flow. The workflow in `.github/workflows/pages.yml`
 publishes that directory to GitHub Pages.
 
@@ -65,19 +68,12 @@ The generated eBPF bindings are produced by `bpf2go` from `ebpf-profiler/pkg/pro
 ## Go AST Profiler
 
 ```sh
-cd go
+cd go/profiler
 go test ./...
-go run ./profiler -dir ./apps/traffic -name traffic-generator
-docker compose up
-```
-
-## Python AST Profiler
-
-```sh
-cd python
-python3 -m unittest discover -s tests
-python3 -m runtimeconditions.profiler -d apps/traffic -n traffic-generator
-docker compose up
+go run . \
+  -dir ../../demos/apps/request-logger-http \
+  -name request-logger-http \
+  -workload-version dev
 ```
 
 ## Try It Out

@@ -1,5 +1,7 @@
 # Golang HTTP Profiler
 
+## This is experimental and should be treated as such
+
 Minimal eBPF-backed HTTP syscall and environment variable profiler written in Golang, plus a tiny test service and traffic generator. 
 
 It's a PoC in the service of [this initiative](https://github.com/cncf/toc/issues/1797).

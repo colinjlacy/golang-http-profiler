@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/colinjlacy/golang-ast-inspection/go/profiler/extractor"
+	"github.com/colinjlacy/runtime-conditions-profiles/go/profiler/extractor"
 	"gopkg.in/yaml.v3"
 )
 
