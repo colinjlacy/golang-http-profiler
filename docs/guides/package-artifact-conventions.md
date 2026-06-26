@@ -85,7 +85,7 @@ The current example implements a Go section.
 
 ```yaml
 go:
-  importPath: github.com/example/aws-sdk-go-v2/service/s3
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3
   package: s3
 
   constructors:
@@ -201,6 +201,31 @@ go:
         - function: Optional
           target: env.required
           value: "false"
+
+    - function: EnvAlternative
+      target: configuration.alternatives[]
+      appliesToKinds:
+        - api
+        - datastore
+        - cache
+      appliesToInterfaceTypes:
+        - http
+        - relational
+        - document
+        - key_value
+      options:
+        - function: Env
+          target: configuration.env[]
+          stringArgs:
+            property: 0
+            name: 1
+          options:
+            - function: Sensitive
+              target: env.sensitive
+              value: "true"
+            - function: Optional
+              target: env.required
+              value: "false"
 ```
 
 A generator applies a package-level option only when the option call appears inside a compatible declaration call. If a package is imported but none of its options are applied to generated Conditions, its extension is not emitted in the profile.
@@ -216,7 +241,7 @@ Generators SHOULD use language-native package resolution and then check conventi
 For a Go import:
 
 ```go
-import "github.com/example/aws-sdk-go-v2/service/s3"
+import "github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3"
 ```
 
 The generator resolves the import path to a package directory and checks:

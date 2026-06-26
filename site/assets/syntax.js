@@ -21,7 +21,7 @@
     }
     if (
       raw.includes("condition.get(") ||
-      raw.includes("env_from_configuration(") ||
+      raw.includes("redis_request(") ||
       raw.includes("f\"") ||
       trimmed.startsWith("for ")
     ) {

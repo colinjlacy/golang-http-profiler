@@ -14,7 +14,7 @@ This repository is organized around a [three-step workflow](https://colinjlacy.g
 
 - The source code uses integrations. For an example, the demo app calls an HTTP API and Redis.
 - A generator emits a profile that includes requirements and environment variable names, not target values.
-- An adapter fulfills the profile. The Kratix demo assets map Conditions to platform resources such as Redis, ConfigMaps, Secrets, and network policy.
+- An adapter fulfills the profile. The Kratix demo maps Conditions to API catalog validation, Redis provisioning, environment variables, and Kubernetes Deployment/Service resources.
 
 ## Who Benefits
 
@@ -27,7 +27,7 @@ This repository is organized around a [three-step workflow](https://colinjlacy.g
 **Platform Engineers:**
 
 - Get a cross-cutting view of all integrations across your platform, with one spec file per service.
-- Automate downstream configurations (Kubernetes, Cilium, etc.) from the spec.
+- Automate downstream configurations such as Kubernetes workloads, catalog checks, and provider resource requests from the spec.
 
 **Cloud Providers:**
 

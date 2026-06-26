@@ -56,11 +56,12 @@ go test ./...</code></pre>
           <h2>Run path</h2>
           <div class="example">
             <div class="example-title">From the repository root</div>
-            <pre><code>cd go/profiler
-go run . \
-  -dir ../../demos/apps/request-logger-http \
-  -name request-logger-http \
-  -workload-version dev</code></pre>
+            <pre><code>demos/kratix/scripts/00-check-prereqs.sh
+demos/kratix/scripts/01-install-kratix.sh
+demos/kratix/scripts/02-install-promises.sh
+demos/kratix/scripts/03-deploy-catalog-and-provider.sh
+demos/kratix/scripts/04-deploy-application-release.sh
+demos/kratix/scripts/05-smoke-test.sh</code></pre>
           </div>
         </section>
 
@@ -69,8 +70,8 @@ go run . \
           <ol class="step-list">
             <li><span class="step-num">1</span><div><strong>Generator emits profile</strong><span>API and Redis Conditions are discovered from explicit source declarations.</span></div></li>
             <li><span class="step-num">2</span><div><strong>Adapter validates API</strong><span>The declared `GET /todos/{id}` operation is checked against the catalog OpenAPI document.</span></div></li>
-            <li><span class="step-num">3</span><div><strong>Promises fulfill dependencies</strong><span>Provider outputs satisfy the environment mappings declared in the profile.</span></div></li>
-            <li><span class="step-num">4</span><div><strong>Workload receives env and policy</strong><span>Deployment env refs and Cilium policies are rendered from provider outputs.</span></div></li>
+            <li><span class="step-num">3</span><div><strong>Promises fulfill dependencies</strong><span>Platform resources satisfy the environment mappings declared in the profile.</span></div></li>
+            <li><span class="step-num">4</span><div><strong>Workload receives env</strong><span>Deployment env entries and Kubernetes Deployment/Service resources are rendered from resolved platform context.</span></div></li>
           </ol>
         </section>
 
@@ -78,7 +79,7 @@ go run . \
           <h2>Breaking contract check</h2>
           <div class="example">
             <div class="example-title">The adapter should fail before writing the Deployment</div>
-            <pre><code>Use demos/catalog/apis/todos.openapi.breaking.yaml as the catalog input for the adapter.</code></pre>
+            <pre><code>demos/kratix/scripts/06-demo-breaking-change.sh</code></pre>
           </div>
         </section>
 

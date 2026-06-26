@@ -229,7 +229,7 @@ package fixture
 import (
 	"context"
 
-	"github.com/example/aws-sdk-go-v2/service/s3"
+	"github.com/colinjlacy/runtime-conditions-profiles/examples/sdks/aws-sdk-go-v2/service/s3"
 )
 
 func write(ctx context.Context) error {

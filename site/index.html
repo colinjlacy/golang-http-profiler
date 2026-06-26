@@ -46,7 +46,7 @@
           <ol class="step-list">
             <li><span class="step-num">1</span><div><strong>Source code uses integrations.</strong><span>The demo app calls an HTTP API and Redis.</span></div></li>
             <li><span class="step-num">2</span><div><strong>A generator emits a profile.</strong><span>The profile names requirements and environment variable names, not target values.</span></div></li>
-            <li><span class="step-num">3</span><div><strong>An adapter fulfills the profile.</strong><span>The Kratix demo assets map Conditions to provider outputs and deployment resources.</span></div></li>
+            <li><span class="step-num">3</span><div><strong>An adapter fulfills the profile.</strong><span>The Kratix demo maps Conditions to API catalog validation, Redis provisioning, env vars, and Kubernetes resources.</span></div></li>
           </ol>
         </section>
 
@@ -64,7 +64,7 @@ metadata:
   name: request-logger-http
 
 workload:
-  uri: github.com/example/request-logger-http
+  uri: github.com/colinjlacy/runtime-conditions-profiles/demos/apps/request-logger-http
   version: v0.1.0
 
 extensions:

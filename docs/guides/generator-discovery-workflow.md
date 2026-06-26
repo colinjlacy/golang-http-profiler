@@ -88,7 +88,7 @@ cd go/profiler
 go run . \
   -dir ../../demos/apps/request-logger-http \
   -name request-logger-http \
-  -workload-uri github.com/example/request-logger-http \
+  -workload-uri github.com/colinjlacy/runtime-conditions-profiles/demos/apps/request-logger-http \
   -workload-version v0.1.0
 ```
 
@@ -127,20 +127,19 @@ conditions:
 
 The `todos-api` and `request-cache` Conditions come from explicit first-party declaration package calls in the workload. A workload that also imports an SDK package with a manifest can emit additional SDK-discovered Conditions from that SDK usage.
 
-The profile records the environment variable names expected by the workload. It does not contain the values for those variables. In the Kratix demo, the runtime-workload adapter maps these requested properties to provider-owned outputs:
+The profile records the environment variable names expected by the workload. It does not contain the values for those variables. In the Kratix demo, the `ApplicationRelease` Promise resolver maps these requested properties to platform-owned outputs:
 
 | Condition property | Kubernetes source |
 | ---- | ---- |
 | `baseUrl` | Literal service URL from the API catalog |
-| `url`, `hostname`, `port` | Redis Promise connection ConfigMap |
+| `url`, `hostname`, `port` | Redis service address rendered from the generated Redis request |
 
-The same adapter emits Cilium policy requests for the resolved workload:
+The resolver applies platform context in two steps:
 
-- A `CiliumNamespaceLockdown` request creates namespace default-deny pod networking.
-- A `CiliumAPIAccess` request is emitted for API Conditions that declare HTTP operations. That request contains the workload selector, resolved service or FQDN destination, port, and only the `method` and `path` pairs declared by the Condition.
-- Redis requests include the workload selector so their Promises can render dependency-specific Cilium policies.
+- API Conditions are validated against the catalog OpenAPI document before the workload Deployment is emitted.
+- Redis cache Conditions emit a `Redis` request and bind the generated service address into the workload environment.
 
-The generator still emits only the Runtime Conditions Profile. Network-policy requests are adapter output.
+The generator still emits only the Runtime Conditions Profile. `ApplicationRelease` resolution and Kubernetes resources are adapter output.
 
 ---
 

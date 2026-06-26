@@ -235,7 +235,20 @@ common.Cache("request-cache",
         - cache
       stringArgs:
         property: 0
-        name: 1</code></pre>
+        name: 1
+
+    - function: EnvAlternative
+      target: configuration.alternatives[]
+      appliesToKinds:
+        - api
+        - datastore
+        - cache
+      options:
+        - function: Env
+          target: configuration.env[]
+          stringArgs:
+            property: 0
+            name: 1</code></pre>
           </div>
         </section>
 
