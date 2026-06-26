@@ -204,6 +204,42 @@ spec:
         </section>
 
         <section class="section">
+          <h2>Declaration packages follow ownership</h2>
+          <p class="short">
+            Common declarations come from `common-integrations/go`. Environment configuration contributes typed options from `env-configuration/go`.
+          </p>
+          <div class="example">
+            <div class="example-title">Dual-import declaration code</div>
+            <pre><code>import (
+  common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+  env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)
+
+common.Cache("request-cache",
+  common.KeyValue(common.Redis),
+  env.EnvAlternative(env.Env("url", "REDIS_URL")),
+)</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">Option-only package manifest</div>
+            <pre><code>go:
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go
+  package: envconfiguration
+
+  options:
+    - function: Env
+      target: configuration.env[]
+      appliesToKinds:
+        - api
+        - datastore
+        - cache
+      stringArgs:
+        property: 0
+        name: 1</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
           <h2>How a profile uses extensions</h2>
           <p class="short">
             The profile declares every extension required to interpret its vocabulary. Transitive dependencies are resolved by validators and tooling, but generated profiles should still declare the vocabulary they directly use.

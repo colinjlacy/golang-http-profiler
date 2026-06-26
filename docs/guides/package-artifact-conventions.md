@@ -122,7 +122,10 @@ Fields:
 | `go.importPath` | YES | Go import path that identifies the package |
 | `go.package` | NO | Default package name used when the import has no local alias |
 | `go.constructors` | NO | Functions that construct typed SDK clients |
-| `go.declarations` | YES | Source call mappings that emit Conditions |
+| `go.declarations` | NO | Source call mappings that emit Conditions |
+| `go.options` | NO | Package-level option mappings that augment compatible declarations |
+
+At least one of `go.declarations` or `go.options` must be present.
 
 Constructor fields:
 
@@ -168,6 +171,39 @@ options:
 Nested options are useful for no-op declaration packages. SDK operation manifests usually prefer static values or future language-specific extraction rules.
 
 Configuration mappings let SDK authors surface hidden SDK inputs without emitting concrete values. For example, an SDK can state that generated S3 Conditions require a `bucket`, `region`, `accessKeyId`, and `secretAccessKey`, and can name the environment variables that the workload expects for those inputs. The generated profile carries the names; adapters map those properties to platform-provided ConfigMaps, Secrets, service URLs, or other delivery mechanisms.
+
+Package-level options let additive extension packages contribute fields to declarations owned by another package. For example, the Environment Configuration Go package exports only env option functions:
+
+```yaml
+go:
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go
+  package: envconfiguration
+
+  options:
+    - function: Env
+      target: configuration.env[]
+      appliesToKinds:
+        - api
+        - datastore
+        - cache
+      appliesToInterfaceTypes:
+        - http
+        - relational
+        - document
+        - key_value
+      stringArgs:
+        property: 0
+        name: 1
+      options:
+        - function: Sensitive
+          target: env.sensitive
+          value: "true"
+        - function: Optional
+          target: env.required
+          value: "false"
+```
+
+A generator applies a package-level option only when the option call appears inside a compatible declaration call. If a package is imported but none of its options are applied to generated Conditions, its extension is not emitted in the profile.
 
 ---
 

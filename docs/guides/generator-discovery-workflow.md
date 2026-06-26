@@ -284,9 +284,9 @@ Package manifest discovery is additive. It does not replace explicit declaration
 For raw HTTP calls or SDKs without package manifests, developers can still write explicit declarations:
 
 ```go
-rc.API("todos-api",
-	rc.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
-	rc.GET("/todos/{id}", rc.Response[Todo]()),
+common.API("todos-api",
+	common.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
+	common.GET("/todos/{id}", common.Response[Todo]()),
 )
 ```
 

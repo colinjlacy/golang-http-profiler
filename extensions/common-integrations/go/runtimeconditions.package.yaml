@@ -6,7 +6,7 @@ extension:
   definition: ../common-integrations-v1alpha1.yaml
 
 go:
-  importPath: github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go
   package: commonintegrations
 
   constants:

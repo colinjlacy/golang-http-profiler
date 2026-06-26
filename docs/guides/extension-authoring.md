@@ -182,7 +182,130 @@ Schemas from multiple resolved extensions apply additively. A Condition must sat
 
 ---
 
-# 6. Authoring Checklist
+# 6. Go Declaration Packages
+
+Go declaration packages should mirror extension ownership.
+
+A base extension package exports the declarations and option types for the vocabulary it owns:
+
+```go
+package commonintegrations
+
+type APIOption interface {
+	CommonIntegrationsAPIOption()
+}
+
+type CacheOption interface {
+	CommonIntegrationsCacheOption()
+}
+
+func API(name string, options ...APIOption) Declaration {
+	return Declaration{}
+}
+
+func Cache(name string, options ...CacheOption) Declaration {
+	return Declaration{}
+}
+```
+
+An additive extension package exports only its own options. It may import a base package so its options can satisfy the base package's marker interfaces:
+
+```go
+package envconfiguration
+
+import common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+
+type ConditionOption interface {
+	common.APIOption
+	common.DatastoreOption
+	common.CacheOption
+	envConfigurationConditionOption()
+}
+
+type conditionOption struct{}
+
+func (conditionOption) CommonIntegrationsAPIOption()       {}
+func (conditionOption) CommonIntegrationsDatastoreOption() {}
+func (conditionOption) CommonIntegrationsCacheOption()     {}
+func (conditionOption) envConfigurationConditionOption()   {}
+
+func Env(property, name string, options ...EnvOption) ConditionOption {
+	return conditionOption{}
+}
+```
+
+Application code imports both packages when it uses both extensions:
+
+```go
+import (
+	common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+	env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)
+
+var _ = common.Cache("request-cache",
+	common.KeyValue(common.Redis),
+	env.EnvAlternative(env.Env("url", "REDIS_URL")),
+)
+```
+
+The generated profile lists both extensions because both packages directly contributed vocabulary:
+
+```yaml
+extensions:
+  - https://runtimeconditions.io/extensions/common-integrations:v1alpha1
+  - https://runtimeconditions.io/extensions/env-configuration:v1alpha1
+```
+
+If a workload imports only `common-integrations/go`, the profile lists only `common-integrations`. If it imports `env-configuration/go` but does not apply an env option to a Condition, the profile does not list `env-configuration`.
+
+Adapters and validators still resolve transitive extension dependencies from extension definitions. Direct profile declarations and dependency resolution are separate steps.
+
+---
+
+# 7. Package Manifest Option Augmentation
+
+The package manifest for a base declaration package maps source calls to Conditions:
+
+```yaml
+go:
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go
+  package: commonintegrations
+
+  declarations:
+    - function: Cache
+      nameArg: 0
+      kind: cache
+      options:
+        - function: KeyValue
+          target: interface.type
+          value: key_value
+          engineArg: 0
+```
+
+The package manifest for an option-only extension maps source calls to fields that can augment compatible Conditions:
+
+```yaml
+go:
+  importPath: github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go
+  package: envconfiguration
+
+  options:
+    - function: Env
+      target: configuration.env[]
+      appliesToKinds:
+        - api
+        - datastore
+        - cache
+      stringArgs:
+        property: 0
+        name: 1
+```
+
+Generators use `go.options` only when an option call appears inside a compatible declaration call. Standalone option calls are ignored for profile emission.
+
+---
+
+# 8. Authoring Checklist
 
 - Define only vocabulary your extension owns.
 - Declare dependencies for vocabulary you reference but do not own.
@@ -190,4 +313,7 @@ Schemas from multiple resolved extensions apply additively. A Condition must sat
 - Use `fieldValues` for portable, adapter-visible enums.
 - Use JSON Schema for machine-readable validation.
 - Keep schemas focused on your extension's fields and allow unrelated properties.
+- Export only declaration functions for vocabulary your package owns.
+- For additive Go packages, export typed options that satisfy base package marker interfaces.
+- Describe additive Go options with package-level `go.options` mappings.
 - Do not encode secrets, concrete target-environment values, or provider-specific fulfillment choices.

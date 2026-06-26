@@ -45,28 +45,15 @@
           <p class="short">The declarations are regular Go calls. They are intentionally no-op at runtime, but the generator can identify them in the AST.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/apps/request-logger-http/main.go</span>
-              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/go/apps/request-logger-http/main.go">source</a>
+              <span>go/apps/request-logger-http/conditions.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/go/apps/request-logger-http/conditions.go">source</a>
             </div>
             <pre><code>package main
 
 import (
-  "context"
-  "encoding/json"
-  "errors"
-  "fmt"
-  "net/http"
-  "os"
-  "strings"
-
-  rc "github.com/colinjlacy/golang-ast-inspection/go/runtimeconditions"
-)
-
-type Todo struct {
-  ID        int    `json:"id"`
-  Title     string `json:"title"`
-  Completed bool   `json:"completed"`
-}</code></pre>
+  common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+  env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)</code></pre>
           </div>
         </section>
 
@@ -75,22 +62,22 @@ type Todo struct {
           <p class="short">The API declaration names the catalog entry, the HTTP operation the workload calls, the expected response shape, and the environment variable the app reads.</p>
           <div class="example">
             <div class="example-title">
-              <span>go/apps/request-logger-http/main.go</span>
-              <a href="https://github.com/colinjlacy/golang-http-profiler/blob/main/go/apps/request-logger-http/main.go">source</a>
+              <span>go/apps/request-logger-http/conditions.go</span>
+              <a href="https://github.com/colinjlacy/runtime-conditions-profiles/blob/main/go/apps/request-logger-http/conditions.go">source</a>
             </div>
             <pre><code>func init() {
-  rc.API("todos-api",
-    rc.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
-    rc.GET("/todos/{id}", rc.Response[Todo]()),
-    rc.Env("baseUrl", "TODOS_API_URL"),
+  common.API("todos-api",
+    common.Spec("openapi", "catalog://api/default/todos-api", "1.0.0"),
+    common.GET("/todos/{id}", common.Response[Todo]()),
+    env.Env("baseUrl", "TODOS_API_URL"),
   )
 
-  rc.Cache("request-cache",
-    rc.KeyValue(rc.Redis),
-    rc.EnvAlternative(rc.Env("url", "REDIS_URL")),
-    rc.EnvAlternative(
-      rc.Env("hostname", "REDIS_HOST"),
-      rc.Env("port", "REDIS_PORT"),
+  common.Cache("request-cache",
+    common.KeyValue(common.Redis),
+    env.EnvAlternative(env.Env("url", "REDIS_URL")),
+    env.EnvAlternative(
+      env.Env("hostname", "REDIS_HOST"),
+      env.Env("port", "REDIS_PORT"),
     ),
   )
 }</code></pre>

@@ -114,6 +114,7 @@ type goBinding struct {
 	Constants               map[string]string
 	Constructors            []goBindingConstructor
 	Declarations            []goBindingDeclaration
+	Options                 []goBindingOption
 }
 
 type goBindingConstructor struct {
@@ -140,15 +141,23 @@ type goBindingValue struct {
 }
 
 type goBindingOption struct {
-	Function   string            `yaml:"function"`
-	Target     string            `yaml:"target"`
-	Value      string            `yaml:"value"`
-	ValueArg   *int              `yaml:"valueArg"`
-	TypeArg    *int              `yaml:"typeArg"`
-	EngineArg  *int              `yaml:"engineArg"`
-	Method     string            `yaml:"method"`
-	StringArgs map[string]int    `yaml:"stringArgs"`
-	Options    []goBindingOption `yaml:"options"`
+	Function                string            `yaml:"function"`
+	Target                  string            `yaml:"target"`
+	Value                   string            `yaml:"value"`
+	ValueArg                *int              `yaml:"valueArg"`
+	TypeArg                 *int              `yaml:"typeArg"`
+	EngineArg               *int              `yaml:"engineArg"`
+	Method                  string            `yaml:"method"`
+	AppliesToKinds          []string          `yaml:"appliesToKinds"`
+	AppliesToInterfaceTypes []string          `yaml:"appliesToInterfaceTypes"`
+	StringArgs              map[string]int    `yaml:"stringArgs"`
+	Options                 []goBindingOption `yaml:"options"`
+}
+
+type goBindingOptionMatch struct {
+	binding  *goBinding
+	option   goBindingOption
+	typeArgs []ast.Expr
 }
 
 type goBindingImports struct {
@@ -181,6 +190,7 @@ type goBindingDocument struct {
 		Constants    map[string]string      `yaml:"constants"`
 		Constructors []goBindingConstructor `yaml:"constructors"`
 		Declarations []goBindingDeclaration `yaml:"declarations"`
+		Options      []goBindingOption      `yaml:"options"`
 	} `yaml:"go"`
 }
 
@@ -250,12 +260,15 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 			if !ok {
 				return true
 			}
-			condition, err := e.parseBindingCondition(call, binding, declaration, bindingImports)
+			condition, optionBindings, err := e.parseBindingCondition(call, binding, declaration, bindingImports)
 			if err != nil {
 				walkErr = e.nodeError(call, err)
 				return false
 			}
 			extensions[binding.ExtensionID] = true
+			for _, optionBinding := range optionBindings {
+				extensions[optionBinding.ExtensionID] = true
+			}
 			conditions = append(conditions, condition)
 			return false
 		})
@@ -379,8 +392,8 @@ func readGoBinding(path string) (*goBinding, error) {
 	if document.Go.ImportPath == "" {
 		return nil, fmt.Errorf("%s: go.importPath is required", path)
 	}
-	if len(document.Go.Declarations) == 0 {
-		return nil, fmt.Errorf("%s: go.declarations must not be empty", path)
+	if len(document.Go.Declarations) == 0 && len(document.Go.Options) == 0 {
+		return nil, fmt.Errorf("%s: go.declarations or go.options must not be empty", path)
 	}
 	definitionPath := extensionDefinition
 	if definitionPath != "" && !filepath.IsAbs(definitionPath) {
@@ -399,6 +412,7 @@ func readGoBinding(path string) (*goBinding, error) {
 		Constants:               document.Go.Constants,
 		Constructors:            document.Go.Constructors,
 		Declarations:            document.Go.Declarations,
+		Options:                 document.Go.Options,
 	}, nil
 }
 
@@ -705,17 +719,47 @@ func bindingConstructorForCall(call *ast.CallExpr, imports goBindingImports) (*g
 	return nil, "", false
 }
 
-func bindingOptionForCall(call *ast.CallExpr, imports goBindingImports, binding *goBinding, options []goBindingOption) (goBindingOption, []ast.Expr, bool) {
+func bindingOptionForCall(call *ast.CallExpr, imports goBindingImports, binding *goBinding, options []goBindingOption) (goBindingOptionMatch, bool) {
 	name, typeArgs, optionBinding, ok := callNameTypeArgsAndBinding(call, imports)
 	if !ok || optionBinding != binding {
-		return goBindingOption{}, nil, false
+		return goBindingOptionMatch{}, false
 	}
 	for _, option := range options {
 		if option.Function == name {
-			return option, typeArgs, true
+			return goBindingOptionMatch{binding: optionBinding, option: option, typeArgs: typeArgs}, true
 		}
 	}
-	return goBindingOption{}, nil, false
+	return goBindingOptionMatch{}, false
+}
+
+func bindingConditionOptionForCall(call *ast.CallExpr, imports goBindingImports, declarationBinding *goBinding, declaration goBindingDeclaration, condition Condition) (goBindingOptionMatch, bool) {
+	name, typeArgs, optionBinding, ok := callNameTypeArgsAndBinding(call, imports)
+	if !ok {
+		return goBindingOptionMatch{}, false
+	}
+	if optionBinding == declarationBinding {
+		for _, option := range declaration.Options {
+			if option.Function == name {
+				return goBindingOptionMatch{binding: optionBinding, option: option, typeArgs: typeArgs}, true
+			}
+		}
+	}
+	for _, option := range optionBinding.Options {
+		if option.Function == name && optionAppliesToCondition(option, condition) {
+			return goBindingOptionMatch{binding: optionBinding, option: option, typeArgs: typeArgs}, true
+		}
+	}
+	return goBindingOptionMatch{}, false
+}
+
+func optionAppliesToCondition(option goBindingOption, condition Condition) bool {
+	if len(option.AppliesToKinds) > 0 && !slices.Contains(option.AppliesToKinds, condition.Kind) {
+		return false
+	}
+	if len(option.AppliesToInterfaceTypes) > 0 && condition.Interface.Type != "" && !slices.Contains(option.AppliesToInterfaceTypes, condition.Interface.Type) {
+		return false
+	}
+	return true
 }
 
 func callNameAndBinding(call *ast.CallExpr, imports goBindingImports) (string, *goBinding, bool) {
@@ -801,6 +845,9 @@ func (b *goBinding) hasDeclaration(name string) bool {
 }
 
 func (b *goBinding) hasOption(name string) bool {
+	if hasBindingOption(b.Options, name) {
+		return true
+	}
 	for _, declaration := range b.Declarations {
 		if hasBindingOption(declaration.Options, name) {
 			return true
@@ -823,15 +870,15 @@ func (b *goBinding) hasConstant(name string) bool {
 	return ok
 }
 
-func (e *extractor) parseBindingCondition(call *ast.CallExpr, binding *goBinding, declaration goBindingDeclaration, imports goBindingImports) (Condition, error) {
+func (e *extractor) parseBindingCondition(call *ast.CallExpr, binding *goBinding, declaration goBindingDeclaration, imports goBindingImports) (Condition, []*goBinding, error) {
 	name := declaration.Name
 	if declaration.NameArg != nil {
 		if *declaration.NameArg >= len(call.Args) {
-			return Condition{}, fmt.Errorf("%s requires a name argument", declaration.displayName())
+			return Condition{}, nil, fmt.Errorf("%s requires a name argument", declaration.displayName())
 		}
 		value, ok := e.stringValue(call.Args[*declaration.NameArg])
 		if !ok {
-			return Condition{}, fmt.Errorf("%s name must be a string literal or string const", declaration.displayName())
+			return Condition{}, nil, fmt.Errorf("%s name must be a string literal or string const", declaration.displayName())
 		}
 		name = value
 	}
@@ -847,10 +894,11 @@ func (e *extractor) parseBindingCondition(call *ast.CallExpr, binding *goBinding
 
 	for _, value := range declaration.Values {
 		if err := applyBindingValue(&condition, value.Target, value.Value); err != nil {
-			return Condition{}, err
+			return Condition{}, nil, err
 		}
 	}
 
+	usedOptionBindings := make(map[*goBinding]bool)
 	for i, arg := range call.Args {
 		if declaration.NameArg != nil && i == *declaration.NameArg {
 			continue
@@ -859,16 +907,23 @@ func (e *extractor) parseBindingCondition(call *ast.CallExpr, binding *goBinding
 		if !ok {
 			continue
 		}
-		option, typeArgs, ok := bindingOptionForCall(subcall, imports, binding, declaration.Options)
+		match, ok := bindingConditionOptionForCall(subcall, imports, binding, declaration, condition)
 		if !ok {
 			continue
 		}
-		if err := e.applyBindingOption(&condition, option, subcall, typeArgs, imports, binding); err != nil {
-			return Condition{}, err
+		if err := e.applyBindingOption(&condition, match.option, subcall, match.typeArgs, imports, match.binding); err != nil {
+			return Condition{}, nil, err
+		}
+		if match.binding != binding {
+			usedOptionBindings[match.binding] = true
 		}
 	}
 
-	return condition, nil
+	optionBindings := make([]*goBinding, 0, len(usedOptionBindings))
+	for optionBinding := range usedOptionBindings {
+		optionBindings = append(optionBindings, optionBinding)
+	}
+	return condition, optionBindings, nil
 }
 
 func (e *extractor) applyBindingOption(
@@ -972,11 +1027,11 @@ func (e *extractor) parseBindingOperation(option goBindingOption, call *ast.Call
 		if !ok {
 			continue
 		}
-		suboption, typeArgs, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		match, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
 		if !ok {
 			continue
 		}
-		if err := e.applyBindingOperationOption(&operation, suboption, typeArgs); err != nil {
+		if err := e.applyBindingOperationOption(&operation, match.option, match.typeArgs); err != nil {
 			return Operation{}, err
 		}
 	}
@@ -1013,13 +1068,13 @@ func (e *extractor) parseBindingEnvAlternative(option goBindingOption, call *ast
 	for _, arg := range call.Args {
 		subcall, ok := unparen(arg).(*ast.CallExpr)
 		if !ok {
-			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must be env input calls", option.Function)
+			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must match nested option calls declared by the package manifest", option.Function)
 		}
-		suboption, _, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
-		if !ok || suboption.Target != "configuration.env[]" {
-			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must be env input calls", option.Function)
+		match, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		if !ok {
+			return ConfigurationAlternative{}, fmt.Errorf("%s arguments must match nested option calls declared by the package manifest", option.Function)
 		}
-		env, err := e.parseBindingEnvInput(suboption, subcall, imports, binding)
+		env, err := e.parseBindingEnvInput(match.option, subcall, imports, match.binding)
 		if err != nil {
 			return ConfigurationAlternative{}, err
 		}
@@ -1043,11 +1098,11 @@ func (e *extractor) parseBindingEnvInput(option goBindingOption, call *ast.CallE
 		if !ok {
 			continue
 		}
-		suboption, _, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
+		match, ok := bindingOptionForCall(subcall, imports, binding, option.Options)
 		if !ok {
 			continue
 		}
-		if err := applyBindingEnvInputOption(&env, suboption); err != nil {
+		if err := applyBindingEnvInputOption(&env, match.option); err != nil {
 			return EnvInput{}, err
 		}
 	}

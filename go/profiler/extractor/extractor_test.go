@@ -9,16 +9,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestExtractDirWithEnvConfigurationFacade(t *testing.T) {
+func TestExtractDirWithCrossExtensionEnvOptions(t *testing.T) {
 	dir := t.TempDir()
+	commonPath := extensionModulePath(t, "common-integrations")
 	envPath := extensionModulePath(t, "env-configuration")
 	writeModule(t, dir, map[string]string{
-		"github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go": envPath,
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go": commonPath,
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go":   envPath,
 	})
 
 	source := `package main
 
-import rc "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
+import (
+	common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+	env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)
 
 const (
 	todoPath = "/todos"
@@ -36,16 +41,16 @@ type Todo struct {
 	Completed bool ` + "`json:\"completed\"`" + `
 }
 
-var _ = rc.API("todos-api",
-	rc.POST(todoPath, rc.Request[CreateTodoRequest](), rc.Response[Todo]()),
-	rc.Env("baseUrl", "TODOS_API_URL"),
+var _ = common.API("todos-api",
+	common.POST(todoPath, common.Request[CreateTodoRequest](), common.Response[Todo]()),
+	env.Env("baseUrl", "TODOS_API_URL"),
 )
 
-var _ = rc.Datastore("primary-db", rc.Relational(rc.MySQL))
-var _ = rc.Cache("todo-cache",
-	rc.KeyValue(rc.Redis),
-	rc.EnvAlternative(rc.Env("url", "REDIS_URL")),
-	rc.EnvAlternative(rc.Env("hostname", "REDIS_HOST"), rc.Env("port", "REDIS_PORT")),
+var _ = common.Datastore("primary-db", common.Relational(common.MySQL))
+var _ = common.Cache("todo-cache",
+	common.KeyValue(common.Redis),
+	env.EnvAlternative(env.Env("url", "REDIS_URL")),
+	env.EnvAlternative(env.Env("hostname", "REDIS_HOST"), env.Env("port", "REDIS_PORT")),
 )
 `
 
@@ -62,7 +67,10 @@ var _ = rc.Cache("todo-cache",
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/env-configuration:v1alpha1"}) {
+	if !slices.Equal(profile.Extensions, []string{
+		"https://runtimeconditions.io/extensions/common-integrations:v1alpha1",
+		"https://runtimeconditions.io/extensions/env-configuration:v1alpha1",
+	}) {
 		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
 	}
 	resolvedExtensions := resolveExtensionsForTest(t, profile.Extensions, map[string]string{
@@ -109,12 +117,12 @@ func TestExtractDirWithCommonIntegrationsOnly(t *testing.T) {
 	dir := t.TempDir()
 	commonPath := extensionModulePath(t, "common-integrations")
 	writeModule(t, dir, map[string]string{
-		"github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go": commonPath,
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go": commonPath,
 	})
 
 	source := `package main
 
-import common "github.com/colinjlacy/golang-http-profiler/extensions/common-integrations/go"
+import common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
 
 var _ = common.Cache("todo-cache", common.KeyValue(common.Redis))
 `
@@ -144,6 +152,50 @@ var _ = common.Cache("todo-cache", common.KeyValue(common.Redis))
 	}
 	if condition.Configuration != nil {
 		t.Fatalf("common-only condition should not include env configuration: %#v", condition.Configuration)
+	}
+}
+
+func TestExtractDirWithUnusedEnvConfigurationPackage(t *testing.T) {
+	dir := t.TempDir()
+	commonPath := extensionModulePath(t, "common-integrations")
+	envPath := extensionModulePath(t, "env-configuration")
+	writeModule(t, dir, map[string]string{
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go": commonPath,
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go":   envPath,
+	})
+
+	source := `package main
+
+import (
+	common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+	env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+)
+
+var _ = env.Sensitive()
+var _ = common.Cache("todo-cache", common.KeyValue(common.Redis))
+`
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := ExtractDir(dir, Options{
+		Name:            "todos",
+		WorkloadURI:     "github.com/example/todos",
+		WorkloadVersion: "v0.1.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(profile.Extensions, []string{"https://runtimeconditions.io/extensions/common-integrations:v1alpha1"}) {
+		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
+	}
+	if len(profile.Conditions) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(profile.Conditions))
+	}
+	if profile.Conditions[0].Configuration != nil {
+		t.Fatalf("unused env package should not configure condition: %#v", profile.Conditions[0].Configuration)
 	}
 }
 
