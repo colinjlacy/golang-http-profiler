@@ -13,8 +13,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3"
 )
 
 type Todo struct {
@@ -105,24 +103,6 @@ func checkTodosAPI(ctx context.Context) error {
 		return errors.New("todos-api response was incomplete")
 	}
 	return nil
-}
-
-func writeAuditLog(ctx context.Context, event string) error {
-	bucket := os.Getenv("AUDIT_LOG_BUCKET")
-	if bucket == "" {
-		return errors.New("AUDIT_LOG_BUCKET is not set")
-	}
-	client := s3.NewFromConfig(s3.Config{})
-	_, err := client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: stringPtr(bucket),
-		Key:    stringPtr("request-logger/demo.json"),
-		Body:   strings.NewReader(event),
-	})
-	return err
-}
-
-func stringPtr(value string) *string {
-	return &value
 }
 
 func checkRedis(ctx context.Context) error {

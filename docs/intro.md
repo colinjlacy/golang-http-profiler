@@ -15,10 +15,11 @@ Read the documents in this order:
 1. [Core Runtime Conditions Profile draft](fifth-draft.md)
 2. [Common Integrations extension](../extensions/common-integrations/README.md)
 3. [Environment Configuration extension](../extensions/env-configuration/README.md)
-4. [SDK integration guide](guides/sdk-integration-guide.md)
-5. [Package artifact conventions](guides/package-artifact-conventions.md)
-6. [Generator discovery and end-user workflow](guides/generator-discovery-workflow.md)
-7. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
+4. [Extension authoring guide](guides/extension-authoring.md)
+5. [SDK integration guide](guides/sdk-integration-guide.md)
+6. [Package artifact conventions](guides/package-artifact-conventions.md)
+7. [Generator discovery and end-user workflow](guides/generator-discovery-workflow.md)
+8. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
 
 The core draft should be reviewed as the specification kernel. It defines:
 
@@ -35,7 +36,7 @@ The core draft should be reviewed as the specification kernel. It defines:
 
 The first-party extensions should be reviewed as standard vocabulary that can be bundled by implementations while still remaining outside the core specification.
 
-The SDK integration guides should be reviewed as non-normative implementation guidance. They describe how SDK authors can package Runtime Conditions metadata so generators can discover Conditions from normal application imports.
+The extension and SDK integration guides should be reviewed as non-normative implementation guidance. They describe how extension authors compose vocabulary and how SDK authors can package Runtime Conditions metadata so generators can discover Conditions from normal application imports.
 
 The implementation proposal should be reviewed as a non-normative feasibility exercise. It demonstrates how generated Runtime Conditions Profiles can be used by a platform workflow, but it is not intended to define the specification itself.
 

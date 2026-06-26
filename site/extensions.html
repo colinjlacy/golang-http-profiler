@@ -48,8 +48,10 @@
                 <tr><th>Extension Part</th><th>What It Does</th><th>Example</th></tr>
               </thead>
               <tbody>
+                <tr><td>`dependencies`</td><td>References vocabulary owned by other extensions.</td><td>`common-integrations:v1alpha1`</td></tr>
                 <tr><td>`kinds`</td><td>Defines Condition categories.</td><td>`api`, `datastore`, `cache`</td></tr>
                 <tr><td>`interfaceTypes`</td><td>Defines valid interface types for a kind.</td><td>`http` for `api`, `key_value` for `cache`</td></tr>
+                <tr><td>`conditionFields`</td><td>Defines extension-owned fields on Conditions.</td><td>`configuration`</td></tr>
                 <tr><td>`interfaceFields`</td><td>Defines extension-owned fields inside `interface`.</td><td>`interface.engine`, `interface.operations`</td></tr>
                 <tr><td>`fieldValues`</td><td>Defines allowed values for extension-owned fields.</td><td>`redis`, `memcached`, `GET`, `POST`</td></tr>
                 <tr><td>`schemas`</td><td>Defines machine-readable validation.</td><td>JSON Schema for HTTP API Conditions</td></tr>
@@ -158,7 +160,7 @@ spec:
         <section class="section">
           <h2>First-party extension: Environment Configuration</h2>
           <p class="short">
-            The Environment Configuration extension adds the `configuration` field. It lets a profile say which workload-facing inputs are expected without embedding the values.
+            The Environment Configuration extension adds the `configuration` field to common integration Conditions. It depends on Common Integrations and scopes its field to common-owned kinds and interface types.
           </p>
           <div class="example">
             <div class="example-title">
@@ -171,7 +173,21 @@ spec:
 
   conditionFields:
     - name: configuration
-      appliesToAllKinds: true
+      appliesToKinds:
+        - api
+      appliesToInterfaceTypes:
+        - http
+    - name: configuration
+      appliesToKinds:
+        - datastore
+      appliesToInterfaceTypes:
+        - relational
+        - document
+    - name: configuration
+      appliesToKinds:
+        - cache
+      appliesToInterfaceTypes:
+        - key_value
 
   fieldValues:
     - field: configuration.env[].property

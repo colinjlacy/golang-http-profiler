@@ -1,7 +1,6 @@
 go 1.25.0
 
 use (
-	./demo/aws-sdk-go-v2
 	./ebpf-profiler
 	./extensions/common-integrations/go
 	./extensions/env-configuration/go

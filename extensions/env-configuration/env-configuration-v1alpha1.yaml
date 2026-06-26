@@ -11,7 +11,21 @@ spec:
 
   conditionFields:
     - name: configuration
-      appliesToAllKinds: true
+      appliesToKinds:
+        - api
+      appliesToInterfaceTypes:
+        - http
+    - name: configuration
+      appliesToKinds:
+        - datastore
+      appliesToInterfaceTypes:
+        - relational
+        - document
+    - name: configuration
+      appliesToKinds:
+        - cache
+      appliesToInterfaceTypes:
+        - key_value
 
   fieldValues:
     - field: configuration.env[].property

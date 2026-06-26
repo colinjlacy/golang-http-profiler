@@ -149,17 +149,14 @@ var _ = common.Cache("todo-cache", common.KeyValue(common.Redis))
 
 func TestExtractDirWithThirdPartyPackageManifest(t *testing.T) {
 	dir := t.TempDir()
-	sdkPath, err := filepath.Abs(filepath.Join("..", "..", "..", "demo", "aws-sdk-go-v2"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	sdkPath := writePackageManifestSDK(t)
 	mod := `module github.com/example/audit-logger
 
 go 1.25.0
 
-require github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2 v0.0.0
+require github.com/example/eventstream v0.0.0
 
-replace github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2 => ` + sdkPath + `
+replace github.com/example/eventstream => ` + sdkPath + `
 `
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {
 		t.Fatal(err)
@@ -170,12 +167,12 @@ replace github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2 => ` + sdk
 import (
 	"context"
 
-	"github.com/colinjlacy/golang-http-profiler/demo/aws-sdk-go-v2/service/s3"
+	"github.com/example/eventstream/service/events"
 )
 
 func writeAuditLog(ctx context.Context) error {
-	client := s3.NewFromConfig(s3.Config{})
-	_, err := client.PutObject(ctx, &s3.PutObjectInput{})
+	client := events.NewClient(events.Config{})
+	err := client.Publish(ctx, events.Event{})
 	return err
 }
 `
@@ -193,7 +190,7 @@ func writeAuditLog(ctx context.Context) error {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(profile.Extensions, []string{"https://aws.example.com/runtimeconditions/object-store:v1alpha1"}) {
+	if !slices.Equal(profile.Extensions, []string{"https://example.com/runtimeconditions/event-sink:v1alpha1"}) {
 		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
 	}
 	if len(profile.Conditions) != 1 {
@@ -201,18 +198,91 @@ func writeAuditLog(ctx context.Context) error {
 	}
 
 	condition := profile.Conditions[0]
-	if condition.Name != "s3-object-store" || condition.Kind != "aws.object_store" {
+	if condition.Name != "audit-events" || condition.Kind != "example.event_sink" {
 		t.Fatalf("unexpected condition identity: %#v", condition)
 	}
-	if condition.Interface.Type != "aws.s3" || condition.Interface.BucketClass != "standard" {
+	if condition.Interface.Type != "event.stream" {
 		t.Fatalf("unexpected interface: %#v", condition.Interface)
 	}
-	if condition.Configuration == nil || len(condition.Configuration.Env) != 4 {
+	if condition.Configuration == nil || len(condition.Configuration.Env) != 2 {
 		t.Fatalf("unexpected configuration: %#v", condition.Configuration)
 	}
-	if condition.Configuration.Env[2].Name != "AWS_ACCESS_KEY_ID" || !condition.Configuration.Env[2].Sensitive {
-		t.Fatalf("unexpected credential configuration: %#v", condition.Configuration.Env[2])
+	if condition.Configuration.Env[1].Name != "EVENTSTREAM_TOKEN" || !condition.Configuration.Env[1].Sensitive {
+		t.Fatalf("unexpected credential configuration: %#v", condition.Configuration.Env[1])
 	}
+}
+
+func writePackageManifestSDK(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "eventstream")
+	packageDir := filepath.Join(root, "service", "events")
+	if err := os.MkdirAll(packageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		filepath.Join(root, "go.mod"): `module github.com/example/eventstream
+
+go 1.25.0
+`,
+		filepath.Join(packageDir, "client.go"): `package events
+
+import "context"
+
+type Config struct{}
+type Event struct{}
+type Client struct{}
+
+func NewClient(cfg Config) *Client {
+	return &Client{}
+}
+
+func (c *Client) Publish(ctx context.Context, event Event) error {
+	return nil
+}
+`,
+		filepath.Join(packageDir, "event-sink-v1alpha1.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsExtension
+
+metadata:
+  uri: https://example.com/runtimeconditions/event-sink
+  version: v1alpha1
+`,
+		filepath.Join(packageDir, "runtimeconditions.package.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsPackage
+
+extension:
+  id: https://example.com/runtimeconditions/event-sink:v1alpha1
+  definition: event-sink-v1alpha1.yaml
+
+go:
+  importPath: github.com/example/eventstream/service/events
+  package: events
+
+  constructors:
+    - function: NewClient
+      receiver: Client
+
+  declarations:
+    - receiver: Client
+      method: Publish
+      name: audit-events
+      kind: example.event_sink
+      interfaceType: event.stream
+      configuration:
+        env:
+          - property: endpoint
+            name: EVENTSTREAM_URL
+          - property: token
+            name: EVENTSTREAM_TOKEN
+            sensitive: true
+`,
+	}
+	for path, content := range files {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
 }
 
 func extensionModulePath(t *testing.T, name string) string {

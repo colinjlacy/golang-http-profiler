@@ -1,6 +1,6 @@
 package main
 
-import rc "github.com/colinjlacy/golang-http-profiler/extensions/env-configuration/go"
+import rc "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
 
 func declaration() {
 	if 1 != 1 {
