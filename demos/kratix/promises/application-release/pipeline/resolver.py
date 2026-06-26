@@ -330,7 +330,7 @@ def parse_catalog_apis(catalog_data: dict[str, str]) -> list[CatalogAPI]:
                     name=name,
                     definition=entity,
                     openapi=yaml.safe_load(catalog_data[definition_key]),
-                    base_url=annotations.get("runtimeconditions.io/base-url"),
+                    base_url=annotations.get("platform.demoteam.io/base-url"),
                 )
             )
     return apis
@@ -338,7 +338,7 @@ def parse_catalog_apis(catalog_data: dict[str, str]) -> list[CatalogAPI]:
 
 def redis_request(name: str, namespace: str, workload_name: str) -> dict[str, Any]:
     return {
-        "apiVersion": "runtimeconditions.io/v1alpha1",
+        "apiVersion": "platform.demoteam.io/v1alpha1",
         "kind": "Redis",
         "metadata": {
             "name": name,

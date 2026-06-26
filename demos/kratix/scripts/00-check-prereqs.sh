@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/common.sh
-source "${SCRIPT_DIR}/lib/common.sh"
-
-require_kubectl_context
-require_cmd docker
-require_cmd go
-require_cmd curl
-require_cmd python3
+for command in kubectl curl; do
+  if ! command -v "${command}" >/dev/null 2>&1; then
+    printf '[runtimeconditions] required command not found: %s\n' "${command}" >&2
+    exit 1
+  fi
+done
 
 kubectl version --client=true
-docker version >/dev/null
-go version
-python3 --version
+curl --version
 
-log "Checking cluster access"
+printf '[runtimeconditions] checking cluster access\n'
 kubectl get nodes
 
-log "Prerequisites look usable"
-
+printf '[runtimeconditions] prerequisites look usable\n'

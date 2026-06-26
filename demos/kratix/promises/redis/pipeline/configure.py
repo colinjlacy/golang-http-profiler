@@ -29,7 +29,7 @@ def main() -> int:
         "app.kubernetes.io/name": name,
         "app.kubernetes.io/component": "cache",
         "app.kubernetes.io/managed-by": "kratix",
-        "runtimeconditions.io/cache-engine": "redis",
+        "platform.demoteam.io/cache-engine": "redis",
     }
 
     deployment: dict[str, Any] = {
@@ -46,6 +46,7 @@ def main() -> int:
                         {
                             "name": "redis",
                             "image": "redis:7-alpine",
+                            "imagePullPolicy": "Always",
                             "ports": [{"name": "redis", "containerPort": 6379}],
                             "resources": resources_for_size(size),
                             "readinessProbe": {

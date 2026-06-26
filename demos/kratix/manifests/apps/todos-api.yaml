@@ -1,32 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: __TODOS_API_NAME__
-  namespace: __DEMO_NAMESPACE__
+  name: todos-api
+  namespace: demo
   labels:
-    app.kubernetes.io/name: __TODOS_API_NAME__
+    app.kubernetes.io/name: todos-api
     app.kubernetes.io/component: provider-api
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: __TODOS_API_NAME__
+      app.kubernetes.io/name: todos-api
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: __TODOS_API_NAME__
+        app.kubernetes.io/name: todos-api
         app.kubernetes.io/component: provider-api
     spec:
       containers:
         - name: todos-api
-          image: __TODOS_API_IMAGE__
-          imagePullPolicy: IfNotPresent
+          image: ghcr.io/colinjlacy/runtime-conditions-profiles-todos-api:latest
+          imagePullPolicy: Always
           ports:
             - name: http
-              containerPort: __TODOS_API_PORT__
+              containerPort: 8080
           env:
             - name: PORT
-              value: "__TODOS_API_PORT__"
+              value: "8080"
           readinessProbe:
             httpGet:
               path: /ready
@@ -37,15 +37,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: __TODOS_API_NAME__
-  namespace: __DEMO_NAMESPACE__
+  name: todos-api
+  namespace: demo
   labels:
-    app.kubernetes.io/name: __TODOS_API_NAME__
+    app.kubernetes.io/name: todos-api
 spec:
   selector:
-    app.kubernetes.io/name: __TODOS_API_NAME__
+    app.kubernetes.io/name: todos-api
   ports:
     - name: http
-      port: __TODOS_API_PORT__
+      port: 8080
       targetPort: http
-

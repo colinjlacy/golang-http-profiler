@@ -8,6 +8,7 @@ This tree contains runnable examples and downstream adapter assets.
 - `apps/todos-api/` - simple provider API used by the request logger demo.
 - `catalog/apis/` - OpenAPI and catalog files used by the adapter demo.
 - `kratix/` - Kratix Promise and adapter assets for downstream fulfillment demos.
+- `kratix/manifests/` - static Kubernetes and Kratix manifests applied by the demo scripts.
 
 ## Generate the Request Logger Profile
 
@@ -36,3 +37,22 @@ The workflow at `.github/workflows/publish-ghcr-images.yml` builds and pushes im
 - `application-release-pipeline`
 - `todos-api`
 - `request-logger`
+
+## Run the Kratix Demo
+
+From the repository root:
+
+```sh
+demos/kratix/scripts/00-check-prereqs.sh
+demos/kratix/scripts/01-install-kratix.sh
+demos/kratix/scripts/03-install-promises.sh
+demos/kratix/scripts/04-deploy-catalog-and-provider.sh
+demos/kratix/scripts/05-rc-deploy.sh
+demos/kratix/scripts/06-smoke-test.sh
+```
+
+To run the contract failure path:
+
+```sh
+demos/kratix/scripts/07-demo-breaking-change.sh
+```
