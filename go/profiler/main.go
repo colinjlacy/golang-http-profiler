@@ -34,6 +34,9 @@ func runGenerate(args []string) {
 	workloadURI := flags.String("workload-uri", "", "workload.uri")
 	workloadVersion := flags.String("workload-version", "dev", "workload.version")
 	extensionsRoot := flags.String("extensions-root", "", "directory containing extension binding manifests; package manifests are discovered from direct imports")
+	skipValidation := flags.Bool("skip-validation", false, "skip extension manifest and generated profile validation")
+	disableGoPackages := flags.Bool("disable-go-packages", false, "disable semantic Go package loading and use syntax-only extraction")
+	requireGoPackages := flags.Bool("require-go-packages", false, "fail extraction when semantic Go package loading fails")
 	out := flags.String("out", "", "output file path; defaults to stdout")
 	flags.Parse(args)
 
@@ -53,10 +56,13 @@ func runGenerate(args []string) {
 	}
 
 	profile, err := extractor.ExtractDir(absDir, extractor.Options{
-		Name:            profileName,
-		WorkloadURI:     uri,
-		WorkloadVersion: *workloadVersion,
-		ExtensionRoots:  splitList(*extensionsRoot),
+		Name:              profileName,
+		WorkloadURI:       uri,
+		WorkloadVersion:   *workloadVersion,
+		ExtensionRoots:    splitList(*extensionsRoot),
+		SkipValidation:    *skipValidation,
+		DisableGoPackages: *disableGoPackages,
+		RequireGoPackages: *requireGoPackages,
 	})
 	if err != nil {
 		exitErr(err)

@@ -457,6 +457,263 @@ func writeAuditLog(ctx context.Context) error {
 	}
 }
 
+func TestExtractDirGoSemanticFixtures(t *testing.T) {
+	tests := []struct {
+		name        string
+		fixture     string
+		workloadURI string
+		golden      string
+	}{
+		{
+			name:        "semantic-imported-symbols",
+			fixture:     "imported-symbols",
+			workloadURI: "github.com/example/runtimeconditions/semantic-imported-symbols",
+			golden:      "testdata/golden/semantic-imported-symbols.golden.yaml",
+		},
+		{
+			name:        "semantic-sdk-receiver",
+			fixture:     "sdk-receiver",
+			workloadURI: "github.com/example/runtimeconditions/semantic-sdk-receiver",
+			golden:      "testdata/golden/semantic-sdk-receiver.golden.yaml",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir, err := filepath.Abs(filepath.Join("testdata", "go-semantic", test.fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			profile, err := ExtractDir(dir, Options{
+				Name:              test.name,
+				WorkloadURI:       test.workloadURI,
+				WorkloadVersion:   "v0.1.0",
+				RequireGoPackages: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := yaml.Marshal(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := os.ReadFile(test.golden)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != string(want) {
+				t.Fatalf("semantic fixture profile mismatch\n--- got ---\n%s\n--- want ---\n%s", data, want)
+			}
+		})
+	}
+}
+
+func TestExtractDirWithGoPackagesSemanticResolution(t *testing.T) {
+	dir := t.TempDir()
+	commonPath := extensionModulePath(t, "common-integrations")
+	envPath := extensionModulePath(t, "env-configuration")
+	writeModule(t, dir, map[string]string{
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go": commonPath,
+		"github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go":   envPath,
+	})
+	writeFilesForTest(t, map[string]string{
+		filepath.Join(dir, "settings", "settings.go"): `package settings
+
+const (
+	APIName = "todos-api"
+	TodoPath = "/todos"
+	BaseURLEnv = "TODOS_API_URL"
+)
+`,
+		filepath.Join(dir, "models", "models.go"): `package models
+
+type CreateTodoRequest struct {
+	UserID int ` + "`json:\"userId\"`" + `
+	Title string ` + "`json:\"title\"`" + `
+}
+
+type Todo struct {
+	ID int ` + "`json:\"id\"`" + `
+	Completed bool ` + "`json:\"completed\"`" + `
+}
+`,
+		filepath.Join(dir, "main.go"): `package main
+
+import (
+	common "github.com/colinjlacy/runtime-conditions-profiles/extensions/common-integrations/go"
+	env "github.com/colinjlacy/runtime-conditions-profiles/extensions/env-configuration/go"
+	"github.com/example/testapp/models"
+	"github.com/example/testapp/settings"
+)
+
+type RequestAlias = models.CreateTodoRequest
+
+var _ = common.API(settings.APIName,
+	common.POST(settings.TodoPath, common.Request[RequestAlias](), common.Response[models.Todo]()),
+	env.Env("baseUrl", settings.BaseURLEnv),
+)
+`,
+	})
+
+	profile, err := ExtractDir(dir, Options{
+		Name:              "semantic-resolution",
+		WorkloadURI:       "github.com/example/semantic-resolution",
+		WorkloadVersion:   "v0.1.0",
+		RequireGoPackages: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(profile.Extensions, []string{
+		"https://runtimeconditions.io/extensions/common-integrations:v1alpha1",
+		"https://runtimeconditions.io/extensions/env-configuration:v1alpha1",
+	}) {
+		t.Fatalf("unexpected extensions: %#v", profile.Extensions)
+	}
+	if len(profile.Conditions) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(profile.Conditions))
+	}
+	condition := profile.Conditions[0]
+	if condition.Name != "todos-api" || condition.Interface.Operations[0].Path != "/todos" {
+		t.Fatalf("semantic constants were not resolved: %#v", condition)
+	}
+	requestSchema, ok := condition.Interface.Operations[0].RequestBodySchema.(map[string]any)
+	if !ok || requestSchema["userId"] != "integer" {
+		t.Fatalf("semantic request schema was not resolved: %#v", condition.Interface.Operations[0].RequestBodySchema)
+	}
+	if condition.Configuration == nil || len(condition.Configuration.Env) != 1 || condition.Configuration.Env[0].Name != "TODOS_API_URL" {
+		t.Fatalf("semantic env constant was not resolved: %#v", condition.Configuration)
+	}
+}
+
+func TestExtractDirWithGoPackagesReceiverResolution(t *testing.T) {
+	dir := t.TempDir()
+	sdkPath := writePackageManifestSDK(t)
+	writeModule(t, dir, map[string]string{
+		"github.com/example/eventstream": sdkPath,
+	})
+
+	source := `package main
+
+import (
+	"context"
+
+	"github.com/example/eventstream/service/events"
+)
+
+func writeAuditLog(ctx context.Context, client *events.Client) error {
+	return client.Publish(ctx, events.Event{})
+}
+`
+
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	profile, err := ExtractDir(dir, Options{
+		Name:              "semantic-receiver",
+		WorkloadURI:       "github.com/example/semantic-receiver",
+		WorkloadVersion:   "v0.1.0",
+		RequireGoPackages: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.Conditions) != 1 {
+		t.Fatalf("expected semantic receiver resolution to produce 1 condition, got %d", len(profile.Conditions))
+	}
+	if profile.Conditions[0].Kind != "example.event_sink" {
+		t.Fatalf("unexpected condition: %#v", profile.Conditions[0])
+	}
+}
+
+func TestExtractDirValidatesPackageManifestBeforeExtraction(t *testing.T) {
+	dir := t.TempDir()
+	sdkPath := writePackageManifestSDK(t)
+	manifestPath := filepath.Join(sdkPath, "service", "events", goPackageBindingManifest)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "https://example.com/runtimeconditions/event-sink:v1alpha1", "https://example.com/runtimeconditions/other:v1alpha1", 1))
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeModule(t, dir, map[string]string{
+		"github.com/example/eventstream": sdkPath,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+
+import (
+	"context"
+	"github.com/example/eventstream/service/events"
+)
+
+func writeAuditLog(ctx context.Context) error {
+	client := events.NewClient(events.Config{})
+	return client.Publish(ctx, events.Event{})
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ExtractDir(dir, Options{
+		Name:            "invalid-package-manifest",
+		WorkloadURI:     "github.com/example/invalid-package-manifest",
+		WorkloadVersion: "v0.1.0",
+	})
+	if err == nil {
+		t.Fatal("expected package manifest validation error")
+	}
+	if !strings.Contains(err.Error(), "binding extension id https://example.com/runtimeconditions/other:v1alpha1 does not match extension definition https://example.com/runtimeconditions/event-sink:v1alpha1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractDirValidatesGeneratedProfile(t *testing.T) {
+	dir := t.TempDir()
+	sdkPath := writePackageManifestSDK(t)
+	manifestPath := filepath.Join(sdkPath, "service", "events", goPackageBindingManifest)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "property: token", "property: credential", 1))
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeModule(t, dir, map[string]string{
+		"github.com/example/eventstream": sdkPath,
+	})
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+
+import (
+	"context"
+	"github.com/example/eventstream/service/events"
+)
+
+func writeAuditLog(ctx context.Context) error {
+	client := events.NewClient(events.Config{})
+	return client.Publish(ctx, events.Event{})
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ExtractDir(dir, Options{
+		Name:            "invalid-generated-profile",
+		WorkloadURI:     "github.com/example/invalid-generated-profile",
+		WorkloadVersion: "v0.1.0",
+	})
+	if err == nil {
+		t.Fatal("expected generated profile validation error")
+	}
+	if !strings.Contains(err.Error(), "configuration.env[1].property credential") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExtractDirWithCheckedInAWSSDKPackageManifest(t *testing.T) {
 	dir := t.TempDir()
 	sdkPath, err := filepath.Abs(filepath.Join("..", "..", "..", "examples", "sdks", "aws-sdk-go-v2"))
@@ -1009,11 +1266,31 @@ func (c *Client) Publish(ctx context.Context, event Event) error {
 }
 `,
 		filepath.Join(packageDir, "event-sink-v1alpha1.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
-kind: RuntimeConditionsExtension
+kind: RuntimeConditionsExtensionDefinition
 
 metadata:
   uri: https://example.com/runtimeconditions/event-sink
   version: v1alpha1
+
+spec:
+  kinds:
+    - name: example.event_sink
+  interfaceTypes:
+    - name: event.stream
+      targetKind: example.event_sink
+  conditionFields:
+    - name: configuration
+      appliesToKinds:
+        - example.event_sink
+      appliesToInterfaceTypes:
+        - event.stream
+  fieldValues:
+    - field: configuration.env[].property
+      targetKind: example.event_sink
+      targetType: event.stream
+      values:
+        - endpoint
+        - token
 `,
 		filepath.Join(packageDir, "runtimeconditions.package.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
 kind: RuntimeConditionsPackage
@@ -1051,6 +1328,18 @@ go:
 		}
 	}
 	return root
+}
+
+func writeFilesForTest(t *testing.T, files map[string]string) {
+	t.Helper()
+	for path, content := range files {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func extensionModulePath(t *testing.T, name string) string {

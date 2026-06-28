@@ -28,6 +28,12 @@ type Options struct {
 	RequireLanguagePackage bool
 }
 
+// ProfileOptions configures validation for generated Runtime Conditions
+// Profiles.
+type ProfileOptions struct {
+	CatalogRoots []string
+}
+
 // ValidateExtension validates the extension definition under root, plus any
 // dependency extensions required to check its binding and declaration package.
 func ValidateExtension(root string, opts Options) error {
@@ -37,6 +43,147 @@ func ValidateExtension(root string, opts Options) error {
 // ValidateExtensions validates every extension definition found under root.
 func ValidateExtensions(root string, opts Options) error {
 	return validate(root, opts, false)
+}
+
+// ValidateBindingManifest validates a Go binding or package manifest against
+// its referenced extension definition and resolved dependency graph.
+func ValidateBindingManifest(path string, opts Options) error {
+	if opts.Language == "" {
+		opts.Language = "go"
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	binding, err := readBindingDocument(absPath)
+	if err != nil {
+		return err
+	}
+	extensionDefinition := binding.extensionDefinitionPath()
+	if extensionDefinition == "" {
+		return validationErrors{absPath + ": extension definition is required"}
+	}
+	if !filepath.IsAbs(extensionDefinition) {
+		extensionDefinition = filepath.Join(filepath.Dir(absPath), extensionDefinition)
+	}
+	extensionDefinition, err = filepath.Abs(extensionDefinition)
+	if err != nil {
+		return err
+	}
+	definition, ok, err := readExtensionDefinition(extensionDefinition)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return validationErrors{extensionDefinition + ": kind must be RuntimeConditionsExtensionDefinition"}
+	}
+
+	validator := &validator{opts: opts}
+	if err := validator.loadCatalog(catalogRoots(filepath.Dir(extensionDefinition), opts.CatalogRoots, true)); err != nil {
+		return err
+	}
+	id := definitionID(definition)
+	node := validator.nodes[id]
+	if node == nil {
+		validator.addf(extensionDefinition, "extension definition %s was not loaded from catalog", id)
+		return validator.err()
+	}
+	node.BindingPath = absPath
+	node.Binding = binding
+	node.GoDir = filepath.Dir(absPath)
+	validator.validateNode(id)
+	return validator.err()
+}
+
+// ValidateBindingManifests validates multiple binding manifests and reports all
+// manifest failures together.
+func ValidateBindingManifests(paths []string, opts Options) error {
+	var errs []string
+	seen := make(map[string]bool)
+	for _, path := range paths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		if seen[absPath] {
+			continue
+		}
+		seen[absPath] = true
+		if err := ValidateBindingManifest(absPath, opts); err != nil {
+			errs = appendValidationError(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return validationErrors(errs)
+	}
+	return nil
+}
+
+// ResolveExtensionClosure returns ids plus all transitive extension
+// dependencies, sorted for stable profile output.
+func ResolveExtensionClosure(ids []string, opts ProfileOptions) ([]string, error) {
+	validator := &validator{}
+	if err := validator.loadCatalog(opts.CatalogRoots); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var visit func(string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		node := validator.nodes[id]
+		if node == nil {
+			validator.addf(id, "missing extension definition for %s", id)
+			return
+		}
+		validator.validateNode(id)
+		for _, dependency := range node.Definition.Spec.Dependencies {
+			visit(dependency)
+		}
+	}
+	for _, id := range ids {
+		visit(id)
+	}
+	if err := validator.err(); err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(seen))
+	for id := range seen {
+		result = append(result, id)
+	}
+	slices.Sort(result)
+	return result, nil
+}
+
+// ValidateProfileYAML validates a Runtime Conditions Profile against the
+// resolved vocabulary provided by its declared extensions.
+func ValidateProfileYAML(data []byte, opts ProfileOptions) error {
+	var profile profileDocument
+	if err := yaml.Unmarshal(data, &profile); err != nil {
+		return err
+	}
+	return validateProfile(profile, opts)
+}
+
+func validateProfile(profile profileDocument, opts ProfileOptions) error {
+	validator := &validator{}
+	if err := validator.loadCatalog(opts.CatalogRoots); err != nil {
+		return err
+	}
+	profileValidator := &profileValidator{
+		catalog: validator,
+	}
+	profileValidator.validate(profile)
+	if err := validator.err(); err != nil {
+		profileValidator.errs = appendValidationError(profileValidator.errs, err)
+	}
+	if len(profileValidator.errs) > 0 {
+		return profileValidationErrors(profileValidator.errs)
+	}
+	return nil
 }
 
 func validate(root string, opts Options, targetOnly bool) error {
@@ -197,6 +344,63 @@ type bindingDocument struct {
 		Definition string `yaml:"definition"`
 	} `yaml:"extension"`
 	Go bindingGo `yaml:"go"`
+}
+
+type profileDocument struct {
+	APIVersion string             `yaml:"apiVersion"`
+	Kind       string             `yaml:"kind"`
+	Extensions []string           `yaml:"extensions"`
+	Conditions []profileCondition `yaml:"conditions"`
+}
+
+type profileCondition struct {
+	Name          string                `yaml:"name"`
+	Kind          string                `yaml:"kind"`
+	Interface     profileInterface      `yaml:"interface"`
+	Optional      bool                  `yaml:"optional"`
+	Configuration *profileConfiguration `yaml:"configuration"`
+}
+
+type profileInterface struct {
+	Type        string             `yaml:"type"`
+	Engine      string             `yaml:"engine"`
+	BucketClass string             `yaml:"bucketClass"`
+	Spec        *profileAPISpec    `yaml:"spec"`
+	Operations  []profileOperation `yaml:"operations"`
+	Subjects    []profileSubject   `yaml:"subjects"`
+}
+
+type profileAPISpec struct {
+	Format  string `yaml:"format"`
+	URI     string `yaml:"uri"`
+	Version string `yaml:"version"`
+}
+
+type profileOperation struct {
+	Method            string `yaml:"method"`
+	Path              string `yaml:"path"`
+	RequestBodySchema any    `yaml:"requestBodySchema"`
+	ResponseSchema    any    `yaml:"responseSchema"`
+}
+
+type profileSubject struct {
+	Name          string `yaml:"name"`
+	Direction     string `yaml:"direction"`
+	PayloadSchema any    `yaml:"payloadSchema"`
+}
+
+type profileConfiguration struct {
+	Env          []profileEnvInput                 `yaml:"env"`
+	Alternatives []profileConfigurationAlternative `yaml:"alternatives"`
+}
+
+type profileConfigurationAlternative struct {
+	Env []profileEnvInput `yaml:"env"`
+}
+
+type profileEnvInput struct {
+	Property string `yaml:"property"`
+	Name     string `yaml:"name"`
 }
 
 type bindingGo struct {
@@ -584,10 +788,13 @@ func (v *validator) validateBinding(node *extensionNode, resolved vocabulary) {
 		v.addf(node.BindingPath, "apiVersion must be runtimeconditions.io/v1alpha1")
 	}
 	if binding.Kind != "RuntimeConditionsGoBinding" && binding.Kind != "RuntimeConditionsPackage" {
-		v.addf(node.BindingPath, "kind must be RuntimeConditionsGoBinding")
+		v.addf(node.BindingPath, "kind must be RuntimeConditionsGoBinding or RuntimeConditionsPackage")
 	}
 	if binding.Kind == "RuntimeConditionsPackage" && filepath.Base(node.BindingPath) == goBindingsManifest {
 		v.addf(node.BindingPath, "kind RuntimeConditionsGoBinding is required for %s", goBindingsManifest)
+	}
+	if binding.Kind == "RuntimeConditionsGoBinding" && filepath.Base(node.BindingPath) == goPackageBindingManifest {
+		v.addf(node.BindingPath, "kind RuntimeConditionsPackage is required for %s", goPackageBindingManifest)
 	}
 	if binding.Metadata.Language != "" && binding.Metadata.Language != "go" {
 		v.addf(node.BindingPath, "metadata.language must be go")
@@ -1187,6 +1394,136 @@ func conditionFieldApplies(field extensionConditionField, kind string, interface
 	return len(field.AppliesToInterfaceTypes) == 0 || slices.Contains(field.AppliesToInterfaceTypes, interfaceType)
 }
 
+type profileValidator struct {
+	catalog *validator
+	errs    []string
+}
+
+func (v *profileValidator) validate(profile profileDocument) {
+	if profile.APIVersion != "runtimeconditions.io/v1alpha1" {
+		v.addf("apiVersion must be runtimeconditions.io/v1alpha1")
+	}
+	if profile.Kind != "RuntimeConditionsProfile" {
+		v.addf("kind must be RuntimeConditionsProfile")
+	}
+	if len(profile.Extensions) == 0 && len(profile.Conditions) > 0 {
+		v.addf("extensions must declare the extension dependency closure used by conditions")
+	}
+
+	declared := make(map[string]bool)
+	for _, id := range profile.Extensions {
+		if declared[id] {
+			v.addf("duplicate extension id %s", id)
+			continue
+		}
+		declared[id] = true
+		if v.catalog.nodes[id] == nil {
+			v.addf("missing extension definition for %s", id)
+			continue
+		}
+		v.catalog.validateNode(id)
+	}
+
+	closure := v.extensionClosure(profile.Extensions)
+	for id := range closure {
+		if !declared[id] {
+			v.addf("extensions missing dependency %s", id)
+		}
+	}
+
+	resolved := v.vocabulary(closure)
+	v.catalog.checkResolvedConflicts("profile", resolved)
+	for index, condition := range profile.Conditions {
+		v.validateCondition(index, resolved, condition)
+	}
+}
+
+func (v *profileValidator) extensionClosure(ids []string) map[string]bool {
+	seen := make(map[string]bool)
+	var visit func(string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		node := v.catalog.nodes[id]
+		if node == nil {
+			return
+		}
+		for _, dependency := range node.Definition.Spec.Dependencies {
+			visit(dependency)
+		}
+	}
+	for _, id := range ids {
+		visit(id)
+	}
+	return seen
+}
+
+func (v *profileValidator) vocabulary(ids map[string]bool) vocabulary {
+	var nodes []*extensionNode
+	for id := range ids {
+		node := v.catalog.nodes[id]
+		if node != nil {
+			nodes = append(nodes, node)
+		}
+	}
+	slices.SortFunc(nodes, func(left *extensionNode, right *extensionNode) int {
+		return strings.Compare(left.ID, right.ID)
+	})
+	return vocabulary{nodes: nodes}
+}
+
+func (v *profileValidator) validateCondition(index int, resolved vocabulary, condition profileCondition) {
+	prefix := fmt.Sprintf("conditions[%d]", index)
+	v.expectExactlyOne(resolved.kindCount(condition.Kind), "%s.kind %s", prefix, condition.Kind)
+	v.expectExactlyOne(resolved.interfaceTypeCount(condition.Kind, condition.Interface.Type), "%s.interface.type %s/%s", prefix, condition.Kind, condition.Interface.Type)
+
+	if condition.Interface.Spec != nil {
+		v.expectExactlyOne(resolved.interfaceFieldCount(condition.Kind, condition.Interface.Type, "spec"), "%s.interface.spec for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+		v.expectExactlyOne(resolved.fieldValueCount("interface.spec.format", condition.Kind, condition.Interface.Type, condition.Interface.Spec.Format), "%s.interface.spec.format %s for %s/%s", prefix, condition.Interface.Spec.Format, condition.Kind, condition.Interface.Type)
+	}
+	if len(condition.Interface.Operations) > 0 {
+		v.expectExactlyOne(resolved.interfaceFieldCount(condition.Kind, condition.Interface.Type, "operations"), "%s.interface.operations for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+		for operationIndex, operation := range condition.Interface.Operations {
+			v.expectExactlyOne(resolved.fieldValueCount("interface.operations[].method", condition.Kind, condition.Interface.Type, operation.Method), "%s.interface.operations[%d].method %s for %s/%s", prefix, operationIndex, operation.Method, condition.Kind, condition.Interface.Type)
+		}
+	}
+	if len(condition.Interface.Subjects) > 0 {
+		v.expectExactlyOne(resolved.interfaceFieldCount(condition.Kind, condition.Interface.Type, "subjects"), "%s.interface.subjects for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+	}
+	if condition.Interface.Engine != "" {
+		v.expectExactlyOne(resolved.interfaceFieldCount(condition.Kind, condition.Interface.Type, "engine"), "%s.interface.engine for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+		v.expectExactlyOne(resolved.fieldValueCount("interface.engine", condition.Kind, condition.Interface.Type, condition.Interface.Engine), "%s.interface.engine %s for %s/%s", prefix, condition.Interface.Engine, condition.Kind, condition.Interface.Type)
+	}
+	if condition.Interface.BucketClass != "" {
+		v.expectExactlyOne(resolved.interfaceFieldCount(condition.Kind, condition.Interface.Type, "bucketClass"), "%s.interface.bucketClass for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+		v.expectExactlyOne(resolved.fieldValueCount("interface.bucketClass", condition.Kind, condition.Interface.Type, condition.Interface.BucketClass), "%s.interface.bucketClass %s for %s/%s", prefix, condition.Interface.BucketClass, condition.Kind, condition.Interface.Type)
+	}
+	if condition.Configuration != nil {
+		v.expectExactlyOne(resolved.conditionFieldCount(condition.Kind, condition.Interface.Type, "configuration"), "%s.configuration for %s/%s", prefix, condition.Kind, condition.Interface.Type)
+		for envIndex, env := range condition.Configuration.Env {
+			v.expectExactlyOne(resolved.fieldValueCount("configuration.env[].property", condition.Kind, condition.Interface.Type, env.Property), "%s.configuration.env[%d].property %s for %s/%s", prefix, envIndex, env.Property, condition.Kind, condition.Interface.Type)
+		}
+		for alternativeIndex, alternative := range condition.Configuration.Alternatives {
+			for envIndex, env := range alternative.Env {
+				v.expectExactlyOne(resolved.fieldValueCount("configuration.alternatives[].env[].property", condition.Kind, condition.Interface.Type, env.Property), "%s.configuration.alternatives[%d].env[%d].property %s for %s/%s", prefix, alternativeIndex, envIndex, env.Property, condition.Kind, condition.Interface.Type)
+			}
+		}
+	}
+}
+
+func (v *profileValidator) expectExactlyOne(count int, format string, args ...any) {
+	if count == 1 {
+		return
+	}
+	v.addf(format+": expected exactly one definition, got %d", append(args, count)...)
+}
+
+func (v *profileValidator) addf(format string, args ...any) {
+	v.errs = append(v.errs, fmt.Sprintf(format, args...))
+}
+
 func (b *bindingDocument) extensionID() string {
 	if b.Kind == "RuntimeConditionsPackage" {
 		return b.Extension.ID
@@ -1294,4 +1631,30 @@ func (e validationErrors) Error() string {
 		builder.WriteString(item)
 	}
 	return builder.String()
+}
+
+type profileValidationErrors []string
+
+func (e profileValidationErrors) Error() string {
+	if len(e) == 1 {
+		return e[0]
+	}
+	var builder strings.Builder
+	builder.WriteString("profile validation failed:")
+	for _, item := range e {
+		builder.WriteString("\n- ")
+		builder.WriteString(item)
+	}
+	return builder.String()
+}
+
+func appendValidationError(errs []string, err error) []string {
+	switch typed := err.(type) {
+	case validationErrors:
+		return append(errs, typed...)
+	case profileValidationErrors:
+		return append(errs, typed...)
+	default:
+		return append(errs, err.Error())
+	}
 }

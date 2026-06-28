@@ -3,8 +3,10 @@ package extractor
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,15 +15,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/colinjlacy/runtime-conditions-profiles/go/profiler/extensioncheck"
+	"golang.org/x/tools/go/packages"
 	"gopkg.in/yaml.v3"
 )
 
 // Options configures source extraction and the generated profile metadata.
 type Options struct {
-	Name            string
-	WorkloadURI     string
-	WorkloadVersion string
-	ExtensionRoots  []string
+	Name              string
+	WorkloadURI       string
+	WorkloadVersion   string
+	ExtensionRoots    []string
+	SkipValidation    bool
+	DisableGoPackages bool
+	RequireGoPackages bool
 }
 
 // RuntimeConditionsProfile is the YAML shape emitted by the declarative source
@@ -104,9 +111,18 @@ type parsedFile struct {
 type packageScope struct {
 	structs      map[string]*ast.StructType
 	stringConsts map[string]string
+	semantic     *semanticScope
+}
+
+type semanticScope struct {
+	types      map[ast.Expr]types.TypeAndValue
+	uses       map[*ast.Ident]types.Object
+	defs       map[*ast.Ident]types.Object
+	selections map[*ast.SelectorExpr]*types.Selection
 }
 
 type goBinding struct {
+	ManifestPath            string
 	ExtensionID             string
 	ExtensionDefinitionPath string
 	ImportPath              string
@@ -164,6 +180,8 @@ type goBindingImports struct {
 	aliases      map[string]*goBinding
 	dot          []*goBinding
 	receiverVars map[string]goBindingReceiver
+	bindings     []*goBinding
+	semantic     *semanticScope
 }
 
 type goBindingReceiver struct {
@@ -212,8 +230,8 @@ type extractor struct {
 }
 
 // ExtractDir reads Go source declarations from dir and converts them to a
-// Runtime Conditions Profile. It parses source only; it does not build, import,
-// or execute the target package.
+// Runtime Conditions Profile. It may use the Go toolchain to resolve package
+// semantics, but it does not execute the target package.
 func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -225,6 +243,22 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	scope := &packageScope{
+		structs:      make(map[string]*ast.StructType),
+		stringConsts: make(map[string]string),
+	}
+	if !opts.DisableGoPackages {
+		if semanticFset, semanticFiles, semantic, err := loadGoPackages(absDir); err != nil {
+			if opts.RequireGoPackages {
+				return nil, err
+			}
+		} else if len(semanticFiles) > 0 {
+			fset = semanticFset
+			files = semanticFiles
+			scope.semantic = semantic
+		}
+	}
 	packageBindings, err := discoverGoPackageBindings(absDir, files)
 	if err != nil {
 		return nil, err
@@ -234,10 +268,14 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 		return nil, err
 	}
 	bindings = append(bindings, packageBindings...)
-
-	scope := &packageScope{
-		structs:      make(map[string]*ast.StructType),
-		stringConsts: make(map[string]string),
+	catalogRoots := validationCatalogRoots(opts.ExtensionRoots, bindings)
+	if !opts.SkipValidation {
+		if err := extensioncheck.ValidateBindingManifests(bindingManifestPaths(bindings), extensioncheck.Options{
+			Language:     "go",
+			CatalogRoots: catalogRoots,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	for _, parsed := range files {
 		scope.collect(parsed.file)
@@ -248,7 +286,7 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 	var conditions []Condition
 
 	for _, parsed := range files {
-		bindingImports := runtimeConditionBindingImports(parsed.file, bindings)
+		bindingImports := runtimeConditionBindingImports(parsed.file, bindings, scope.semantic)
 		if len(bindingImports.aliases) == 0 && len(bindingImports.dot) == 0 {
 			continue
 		}
@@ -283,7 +321,7 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 		}
 	}
 
-	return &RuntimeConditionsProfile{
+	profile := &RuntimeConditionsProfile{
 		APIVersion: "runtimeconditions.io/v1alpha1",
 		Kind:       "RuntimeConditionsProfile",
 		Metadata: Metadata{
@@ -295,7 +333,26 @@ func ExtractDir(dir string, opts Options) (*RuntimeConditionsProfile, error) {
 		},
 		Extensions: sortedExtensions(extensions),
 		Conditions: conditions,
-	}, nil
+	}
+	if !opts.SkipValidation {
+		closure, err := extensioncheck.ResolveExtensionClosure(profile.Extensions, extensioncheck.ProfileOptions{
+			CatalogRoots: catalogRoots,
+		})
+		if err != nil {
+			return nil, err
+		}
+		profile.Extensions = closure
+		data, err := yaml.Marshal(profile)
+		if err != nil {
+			return nil, err
+		}
+		if err := extensioncheck.ValidateProfileYAML(data, extensioncheck.ProfileOptions{
+			CatalogRoots: catalogRoots,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return profile, nil
 }
 
 func discoverGoBindings(roots []string) ([]*goBinding, error) {
@@ -426,6 +483,7 @@ func readGoBinding(path string) (*goBinding, error) {
 		}
 	}
 	return &goBinding{
+		ManifestPath:            path,
 		ExtensionID:             extensionID,
 		ExtensionDefinitionPath: definitionPath,
 		ImportPath:              document.Go.ImportPath,
@@ -435,6 +493,113 @@ func readGoBinding(path string) (*goBinding, error) {
 		Declarations:            document.Go.Declarations,
 		Options:                 document.Go.Options,
 	}, nil
+}
+
+func bindingManifestPaths(bindings []*goBinding) []string {
+	seen := make(map[string]bool)
+	var paths []string
+	for _, binding := range bindings {
+		if binding.ManifestPath == "" || seen[binding.ManifestPath] {
+			continue
+		}
+		seen[binding.ManifestPath] = true
+		paths = append(paths, binding.ManifestPath)
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+func validationCatalogRoots(extensionRoots []string, bindings []*goBinding) []string {
+	seen := make(map[string]bool)
+	var roots []string
+	add := func(path string) {
+		if strings.TrimSpace(path) == "" {
+			return
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return
+		}
+		absPath = filepath.Clean(absPath)
+		if seen[absPath] {
+			return
+		}
+		seen[absPath] = true
+		roots = append(roots, absPath)
+	}
+	for _, root := range extensionRoots {
+		add(root)
+	}
+	for _, binding := range bindings {
+		if binding.ExtensionDefinitionPath == "" {
+			continue
+		}
+		dir := filepath.Dir(binding.ExtensionDefinitionPath)
+		add(dir)
+		parent := filepath.Dir(dir)
+		if parent != dir {
+			add(parent)
+		}
+	}
+	return roots
+}
+
+func loadGoPackages(dir string) (*token.FileSet, []parsedFile, *semanticScope, error) {
+	fset := token.NewFileSet()
+	cfg := &packages.Config{
+		Dir:   dir,
+		Fset:  fset,
+		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps,
+		Tests: false,
+	}
+	pkgs, err := packages.Load(cfg, "./...")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var packageErrors []string
+	for _, pkg := range pkgs {
+		for _, pkgErr := range pkg.Errors {
+			packageErrors = append(packageErrors, pkgErr.Error())
+		}
+	}
+	if len(packageErrors) > 0 {
+		return nil, nil, nil, fmt.Errorf("go/packages load failed: %s", strings.Join(packageErrors, "; "))
+	}
+
+	semantic := &semanticScope{
+		types:      make(map[ast.Expr]types.TypeAndValue),
+		uses:       make(map[*ast.Ident]types.Object),
+		defs:       make(map[*ast.Ident]types.Object),
+		selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	var files []parsedFile
+	for _, pkg := range pkgs {
+		if pkg.TypesInfo == nil {
+			continue
+		}
+		for expr, value := range pkg.TypesInfo.Types {
+			semantic.types[expr] = value
+		}
+		for ident, object := range pkg.TypesInfo.Uses {
+			semantic.uses[ident] = object
+		}
+		for ident, object := range pkg.TypesInfo.Defs {
+			if object != nil {
+				semantic.defs[ident] = object
+			}
+		}
+		for selector, selection := range pkg.TypesInfo.Selections {
+			semantic.selections[selector] = selection
+		}
+		for _, file := range pkg.Syntax {
+			position := fset.Position(file.Package)
+			files = append(files, parsedFile{path: position.Filename, file: file})
+		}
+	}
+	slices.SortFunc(files, func(left parsedFile, right parsedFile) int {
+		return strings.Compare(left.path, right.path)
+	})
+	return fset, files, semantic, nil
 }
 
 func directImportPaths(files []parsedFile) []string {
@@ -524,7 +689,7 @@ func parseReplaceLine(line string, replaces map[string]string) {
 		if field != "=>" || i == 0 || i+1 >= len(fields) {
 			continue
 		}
-		replaces[fields[i-1]] = fields[i+1]
+		replaces[fields[0]] = fields[i+1]
 		return
 	}
 }
@@ -630,10 +795,12 @@ func (s *packageScope) collect(file *ast.File) {
 	}
 }
 
-func runtimeConditionBindingImports(file *ast.File, bindings []*goBinding) goBindingImports {
+func runtimeConditionBindingImports(file *ast.File, bindings []*goBinding, semantic *semanticScope) goBindingImports {
 	imports := goBindingImports{
 		aliases:      make(map[string]*goBinding),
 		receiverVars: make(map[string]goBindingReceiver),
+		bindings:     bindings,
+		semantic:     semantic,
 	}
 	bindingsByImport := make(map[string]*goBinding, len(bindings))
 	for _, binding := range bindings {
@@ -851,6 +1018,18 @@ resolved:
 	}
 	receiver, ok := imports.receiverVars[ident.Name]
 	if !ok || receiver.binding == nil {
+		if imports.semantic == nil {
+			return "", goBindingReceiver{}, false
+		}
+		pkgPath, typeName, ok := imports.semantic.receiverTypeForSelector(expr)
+		if !ok {
+			return "", goBindingReceiver{}, false
+		}
+		for _, binding := range imports.bindings {
+			if binding.ImportPath == pkgPath {
+				return expr.Sel.Name, goBindingReceiver{binding: binding, receiver: typeName}, true
+			}
+		}
 		return "", goBindingReceiver{}, false
 	}
 	return expr.Sel.Name, receiver, true
@@ -1258,6 +1437,11 @@ func applyBindingValue(condition *Condition, target string, value string) error 
 }
 
 func (e *extractor) schemaForType(expr ast.Expr) (any, error) {
+	if e.scope.semantic != nil {
+		if typ, ok := e.scope.semantic.typeOf(expr); ok {
+			return e.schemaForGoType(typ, make(map[types.Type]bool))
+		}
+	}
 	switch typed := unparen(expr).(type) {
 	case *ast.Ident:
 		if schemaType, ok := builtinSchemaType(typed.Name); ok {
@@ -1284,6 +1468,85 @@ func (e *extractor) schemaForType(expr ast.Expr) (any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported schema expression %s", exprString(typed))
 	}
+}
+
+func (e *extractor) schemaForGoType(typ types.Type, seen map[types.Type]bool) (any, error) {
+	typ = types.Unalias(typ)
+	if seen[typ] {
+		return map[string]any{}, nil
+	}
+	seen[typ] = true
+	defer delete(seen, typ)
+
+	switch typed := typ.(type) {
+	case *types.Basic:
+		if schemaType, ok := basicSchemaType(typed); ok {
+			return schemaType, nil
+		}
+		return nil, fmt.Errorf("unsupported schema type %q", typed.Name())
+	case *types.Pointer:
+		return e.schemaForGoType(typed.Elem(), seen)
+	case *types.Slice:
+		element, err := e.schemaForGoType(typed.Elem(), seen)
+		if err != nil {
+			return nil, err
+		}
+		return []any{element}, nil
+	case *types.Array:
+		element, err := e.schemaForGoType(typed.Elem(), seen)
+		if err != nil {
+			return nil, err
+		}
+		return []any{element}, nil
+	case *types.Named:
+		if object := typed.Obj(); object != nil && object.Pkg() != nil && object.Pkg().Path() == "time" && object.Name() == "Time" {
+			return "string", nil
+		}
+		return e.schemaForGoType(typed.Underlying(), seen)
+	case *types.Struct:
+		return e.schemaForGoStruct(typed, seen)
+	case *types.Map:
+		if key, ok := types.Unalias(typed.Key()).(*types.Basic); !ok || key.Kind() != types.String {
+			return nil, fmt.Errorf("unsupported schema map key type %s", typed.Key().String())
+		}
+		value, err := e.schemaForGoType(typed.Elem(), seen)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"additionalProperties": value}, nil
+	default:
+		return nil, fmt.Errorf("unsupported schema type %s", typ.String())
+	}
+}
+
+func (e *extractor) schemaForGoStruct(structType *types.Struct, seen map[types.Type]bool) (map[string]any, error) {
+	schema := make(map[string]any)
+	for i := 0; i < structType.NumFields(); i++ {
+		field := structType.Field(i)
+		if !field.Anonymous() && !field.Exported() {
+			continue
+		}
+		fieldSchema, err := e.schemaForGoType(field.Type(), seen)
+		if err != nil {
+			return nil, err
+		}
+		if field.Anonymous() {
+			nested, ok := fieldSchema.(map[string]any)
+			if !ok {
+				continue
+			}
+			for key, value := range nested {
+				schema[key] = value
+			}
+			continue
+		}
+		jsonName, skip := jsonFieldNameFromTag(field.Name(), structType.Tag(i))
+		if skip {
+			continue
+		}
+		schema[jsonName] = fieldSchema
+	}
+	return schema, nil
 }
 
 func (e *extractor) schemaForStruct(structType *ast.StructType) (map[string]any, error) {
@@ -1330,6 +1593,10 @@ func jsonFieldName(defaultName string, tag *ast.BasicLit) (string, bool) {
 	if err != nil {
 		return defaultName, false
 	}
+	return jsonFieldNameFromTag(defaultName, tagValue)
+}
+
+func jsonFieldNameFromTag(defaultName string, tagValue string) (string, bool) {
 	jsonTag := reflect.StructTag(tagValue).Get("json")
 	if jsonTag == "" {
 		return defaultName, false
@@ -1360,9 +1627,29 @@ func builtinSchemaType(name string) (string, bool) {
 	}
 }
 
+func basicSchemaType(typ *types.Basic) (string, bool) {
+	switch typ.Kind() {
+	case types.String:
+		return "string", true
+	case types.Bool:
+		return "boolean", true
+	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
+		return "integer", true
+	case types.Float32, types.Float64:
+		return "number", true
+	default:
+		return "", false
+	}
+}
+
 func (e *extractor) stringValue(expr ast.Expr) (string, bool) {
 	if value, ok := stringLiteral(expr); ok {
 		return value, true
+	}
+	if e.scope.semantic != nil {
+		if value, ok := e.scope.semantic.stringValue(expr); ok {
+			return value, true
+		}
 	}
 	ident, ok := unparen(expr).(*ast.Ident)
 	if !ok {
@@ -1370,6 +1657,67 @@ func (e *extractor) stringValue(expr ast.Expr) (string, bool) {
 	}
 	value, ok := e.scope.stringConsts[ident.Name]
 	return value, ok
+}
+
+func (s *semanticScope) stringValue(expr ast.Expr) (string, bool) {
+	object := s.objectForExpr(expr)
+	constantObject, ok := object.(*types.Const)
+	if !ok || constantObject.Val().Kind() != constant.String {
+		return "", false
+	}
+	return constant.StringVal(constantObject.Val()), true
+}
+
+func (s *semanticScope) typeOf(expr ast.Expr) (types.Type, bool) {
+	if value, ok := s.types[expr]; ok && value.Type != nil {
+		return value.Type, true
+	}
+	if object := s.objectForExpr(expr); object != nil && object.Type() != nil {
+		return object.Type(), true
+	}
+	return nil, false
+}
+
+func (s *semanticScope) objectForExpr(expr ast.Expr) types.Object {
+	switch typed := unparen(expr).(type) {
+	case *ast.Ident:
+		if object := s.uses[typed]; object != nil {
+			return object
+		}
+		return s.defs[typed]
+	case *ast.SelectorExpr:
+		return s.uses[typed.Sel]
+	default:
+		return nil
+	}
+}
+
+func (s *semanticScope) receiverTypeForSelector(selector *ast.SelectorExpr) (string, string, bool) {
+	if selection := s.selections[selector]; selection != nil {
+		if pkgPath, typeName, ok := namedTypeIdentity(selection.Recv()); ok {
+			return pkgPath, typeName, true
+		}
+	}
+	if typ, ok := s.typeOf(selector.X); ok {
+		return namedTypeIdentity(typ)
+	}
+	return "", "", false
+}
+
+func namedTypeIdentity(typ types.Type) (string, string, bool) {
+	typ = types.Unalias(typ)
+	for {
+		pointer, ok := typ.(*types.Pointer)
+		if !ok {
+			break
+		}
+		typ = types.Unalias(pointer.Elem())
+	}
+	named, ok := typ.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return "", "", false
+	}
+	return named.Obj().Pkg().Path(), named.Obj().Name(), true
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {
