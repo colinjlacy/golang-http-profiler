@@ -363,7 +363,7 @@ A declaration entry must map to extension-resolved vocabulary:
 
 A package-level option entry must map to fields that are valid for the declaration scope or for the option's `appliesToKinds` and `appliesToInterfaceTypes` scope. For configuration-style targets, the target field and the configured property field must both be defined in that same scope.
 
-The declarative code package must match the binding manifest. In the current Go implementation, that means:
+The declarative code package must match the binding manifest. For Go packages, that means:
 
 - The parsed Go package name must match `go.package`.
 - Every manifest constant must exist in Go and have the same string value.
@@ -374,14 +374,25 @@ The declarative code package must match the binding manifest. In the current Go 
 - `typeArg` must point to an existing type parameter.
 - Nested options are validated recursively.
 
+For Java packages, that means:
+
+- The Java package declaration must match `java.package`.
+- Every Java declaration and option entry must include the class that owns the static method.
+- Every manifest constant must exist in the referenced Java class and have the same string value.
+- Every declaration and option function named in the manifest must exist as a public static method on the referenced class.
+- `nameArg` and entries in `stringArgs` must point to existing `String` parameters.
+- `classArg` must point to an existing `Class` parameter.
+- Nested options are validated recursively.
+
 Use the static validator before treating an extension as first-party tooling-ready:
 
 ```sh
 cd go/profiler
 go run . validate-extension -root ../../extensions/env-configuration
+go run . validate-extension -root ../../extensions/env-configuration -language java
 ```
 
-The validator loads the target extension definition, resolves dependency extension definitions from the provided package or development roots, checks the binding manifest against the resolved vocabulary, and checks that the declarative code package contains the functions, methods, constructors, constants, and argument positions named by the binding manifest.
+The validator loads the target extension definition, resolves dependency extension definitions from the provided package or development roots, checks the binding manifest against the resolved vocabulary, and checks that the declarative code package contains the language symbols, constants, and argument positions named by the binding manifest.
 
 When validating a single extension directory in this repository, sibling extension directories are included as a local development convenience. Published packages should not depend on repository sibling layout; they should package their own extension definition and declare exact dependency identifiers.
 
@@ -401,6 +412,6 @@ When validating a single extension directory in this repository, sibling extensi
 - Export only declaration functions for vocabulary your package owns.
 - For additive declarative packages, export helper APIs that are compatible with the base declaration package contracts.
 - Describe additive options with binding-level language mappings such as `go.options`.
-- Keep `runtimeconditions.bindings.yaml` identity, package names, symbols, constants, and argument indexes synchronized with the language package.
+- Keep `runtimeconditions.bindings.yaml` identity, package names, symbols, constants, and argument indexes synchronized with each supported language package.
 - Run `go run . validate-extension -root <extension-dir>` before publishing first-party tooling support.
 - Do not encode secrets, concrete target-environment values, or provider-specific fulfillment choices.

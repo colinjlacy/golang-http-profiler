@@ -113,6 +113,13 @@ func TestJavaDeclarationFixtureDocumentsExpectedCallShape(t *testing.T) {
 	}
 }
 
+func TestValidateBindingManifestInfersJavaLanguage(t *testing.T) {
+	path := repoPath(t, "extensions", "common-integrations", "java", goBindingsManifest)
+	if err := ValidateBindingManifest(path, Options{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestJavaDeclarationFixtureCompilesWhenJavacIsAvailable(t *testing.T) {
 	javac, err := exec.LookPath("javac")
 	if err != nil {

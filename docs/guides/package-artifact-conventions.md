@@ -337,7 +337,7 @@ At least one of `java.declarations` or `java.options` must be present.
 
 Generators SHOULD use language-native package resolution and then check conventional manifest locations. They SHOULD NOT recursively scan dependency trees looking for arbitrary manifest files.
 
-The current Go generator supports extraction. Java declaration packages currently exercise the binding convention, but a Java extractor has not been implemented yet. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
+The current Go generator supports extraction. Java declaration packages are validated against the binding convention, but a Java extractor has not been implemented yet. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
 
 ## 6.1 Go
 
