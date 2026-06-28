@@ -95,7 +95,7 @@ Required fields:
 | `apiVersion` | YES | Runtime Conditions API version |
 | `kind` | YES | Must be `RuntimeConditionsPackage` |
 | `metadata.package` | YES | Language package identity |
-| `metadata.language` | YES | Language id such as `go`, `python`, `javascript`, or `typescript` |
+| `metadata.language` | YES | Language id such as `go`, `java`, `python`, `javascript`, or `typescript` |
 | `extension.id` | YES | Exact extension identifier used by generated profiles |
 | `extension.definition` | NO | Package-manifest override path for vendored or local development layouts |
 
@@ -292,13 +292,54 @@ A generator applies a package-level option only when the option call appears ins
 
 ---
 
-# 5. Language Placement Conventions
+# 5. Java Section
+
+The Java declaration package convention mirrors the Go binding shape while using Java package and class ownership for static declaration helpers.
+
+```yaml
+java:
+  package: io.runtimeconditions.extensions.commonintegrations
+
+  constants:
+    Cache.Engine.REDIS: redis
+
+  declarations:
+    - class: Cache
+      function: declare
+      nameArg: 0
+      kind: cache
+      options:
+        - class: Cache
+          function: keyValue
+          target: interface.type
+          value: key_value
+          enumArg: 0
+```
+
+Fields:
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `java.package` | YES | Java package that contains the declaration classes |
+| `java.constants` | NO | Fully qualified enum constants or static fields mapped to extension values |
+| `java.declarations` | NO | Static helper mappings that emit Conditions |
+| `java.options` | NO | Static helper mappings that augment compatible declarations |
+
+Java declaration and option entries reuse the Go manifest terms where possible: `function`, `nameArg`, `stringArgs`, `target`, `value`, and nested `options`. Each Java declaration or option entry MUST include `class`, the Java class that owns the referenced static method. Java-specific argument selectors may include `enumArg` for enum constants and `classArg` for class literals such as `Todo.class`.
+
+Java declaration packages SHOULD use extension-specific entrypoint classes, such as `Api`, `Http`, `Cache`, `Datastore`, and `EnvConfiguration`, rather than a central `RuntimeConditions` class.
+
+At least one of `java.declarations` or `java.options` must be present.
+
+---
+
+# 6. Language Placement Conventions
 
 Generators SHOULD use language-native package resolution and then check conventional manifest locations. They SHOULD NOT recursively scan dependency trees looking for arbitrary manifest files.
 
-The current Go generator supports these conventions. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
+The current Go generator supports extraction. Java declaration packages currently exercise the binding convention, but a Java extractor has not been implemented yet. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
 
-## 5.1 Go
+## 6.1 Go
 
 For a Go import:
 
@@ -315,7 +356,24 @@ The generator resolves the import path to a package directory and checks:
 
 In local development, `go.mod` `replace` directives can resolve a module to a local directory.
 
-## 5.2 Python
+## 6.2 Java
+
+For a Java import:
+
+```java
+import io.runtimeconditions.extensions.commonintegrations.Cache;
+```
+
+A Java generator should resolve the dependency through the build tool classpath or source set and check:
+
+```text
+<resolved package artifact>/runtimeconditions.bindings.yaml
+<resolved package artifact>/runtimeconditions.package.yaml
+```
+
+For source-layout declaration packages in this repository, the manifest is placed next to the Java source root for the extension package.
+
+## 6.3 Python
 
 For Python imports:
 
@@ -333,7 +391,7 @@ A Python generator should resolve the imported distribution or package directory
 
 For wheels, the manifest should be included as package data in the imported package or distribution metadata.
 
-## 5.3 JavaScript and TypeScript
+## 6.4 JavaScript and TypeScript
 
 For JavaScript or TypeScript imports:
 
@@ -359,7 +417,7 @@ This convention does not require a `package.json` property.
 
 ---
 
-# 6. Extension Definition Relationship
+# 7. Extension Definition Relationship
 
 The manifest's extension identifier must match the extension definition it resolves:
 
@@ -405,7 +463,7 @@ If a manifest emits `configuration`, the resolved extension definition should de
 
 ---
 
-# 7. Safety Rules
+# 8. Safety Rules
 
 Generators MUST treat binding and package manifests as static metadata. They MUST NOT execute package code to discover Conditions.
 
@@ -422,7 +480,7 @@ Generators MAY read literal source values, constants, type names, method names, 
 
 ---
 
-# 8. Compatibility
+# 9. Compatibility
 
 Manifest compatibility is governed by `apiVersion`.
 

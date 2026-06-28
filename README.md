@@ -41,7 +41,7 @@ This repository contains:
 
 - `ebpf-profiler/` - the original Linux eBPF runtime observation profiler.
 - `docs/` - the Runtime Conditions Profile specification draft and authoring guides.
-- `extensions/` - first-party extension definitions and their Go declaration packages.
+- `extensions/` - first-party extension definitions and declaration packages.
 - `go/profiler/` - the maintained Go AST profile generator.
 - `demos/apps/` - demo workloads used to exercise declaration packages and downstream adapters.
 - `demos/kratix/` - Kratix adapter and Promise demo assets.
