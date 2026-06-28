@@ -4,7 +4,7 @@
 
 **Non-normative implementation guidance**
 
-This guide documents the repository convention for writing Runtime Conditions extension definitions. The core profile draft defines the extension document shape. This guide explains how extension authors should use that shape so extensions compose cleanly.
+This guide documents the repository convention for writing Runtime Conditions extension definitions. The core profile draft defines the extension document shape. This guide explains how extension authors should use that shape so extensions compose cleanly. For a keyword-by-keyword vocabulary reference, see [Extension Vocabulary Keywords](extension-vocabulary-keywords.md).
 
 ---
 
@@ -205,9 +205,9 @@ For first-party tooling support, `schemas[].appliesToKind` must resolve to exact
 
 ---
 
-# 6. Go Declaration Packages
+# 6. Declarative Code Packages
 
-Go declaration packages should mirror extension ownership.
+Declarative code packages should mirror extension ownership. The examples in this section use Go because that is the current first-party implementation.
 
 A base extension package exports the declarations and option types for the vocabulary it owns:
 

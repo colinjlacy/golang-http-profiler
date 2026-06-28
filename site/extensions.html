@@ -61,6 +61,82 @@
         </section>
 
         <section class="section">
+          <h2>Choosing vocabulary keywords</h2>
+          <p class="short">
+            Each extension keyword answers a different authoring question. Use the smallest keyword that owns the vocabulary you are adding, then use schemas for shape.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Author wants to</th><th>Use</th><th>Result</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Add a Condition category</td><td>`kinds`</td><td>`kind: aws.object_store`</td></tr>
+                <tr><td>Add an interface type for a kind</td><td>`interfaceTypes`</td><td>`interface.type: aws.s3`</td></tr>
+                <tr><td>Add a top-level Condition field</td><td>`conditionFields`</td><td>`configuration`, `trust`, `access`</td></tr>
+                <tr><td>Add a field inside `interface`</td><td>`interfaceFields`</td><td>`interface.engine`, `interface.bucketClass`</td></tr>
+                <tr><td>Define portable value choices</td><td>`fieldValues`</td><td>`redis`, `standard`, `GET`</td></tr>
+                <tr><td>Validate object shape</td><td>`schemas`</td><td>Required properties, arrays, conditional rules</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="example">
+            <div class="example-title">Top-level field vs interface field</div>
+            <pre><code>conditionFields:
+  - name: configuration
+    appliesToKinds:
+      - cache
+    appliesToInterfaceTypes:
+      - key_value
+
+interfaceFields:
+  - name: engine
+    targetKind: cache
+    targetType: key_value</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Field paths point to owned fields</h2>
+          <p class="short">
+            `fieldValues` names allowed values for a field path. It does not create the field; the path must resolve to `interface.type`, an `interfaceFields` entry, or a scoped `conditionFields` entry.
+          </p>
+          <div class="example">
+            <div class="example-title">Interface path</div>
+            <pre><code>interfaceFields:
+  - name: bucketClass
+    targetKind: aws.object_store
+    targetType: aws.s3
+
+fieldValues:
+  - field: interface.bucketClass
+    targetKind: aws.object_store
+    targetType: aws.s3
+    values:
+      - standard
+      - archive</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">Condition field path with array traversal</div>
+            <pre><code>conditionFields:
+  - name: configuration
+    appliesToKinds:
+      - cache
+    appliesToInterfaceTypes:
+      - key_value
+
+fieldValues:
+  - field: configuration.env[].property
+    targetKind: cache
+    targetType: key_value
+    values:
+      - url
+      - hostname
+      - port</code></pre>
+          </div>
+        </section>
+
+        <section class="section">
           <h2>First-party extension: Common Integrations</h2>
           <p class="short">
             The Common Integrations extension defines standard integration vocabulary for APIs, datastores, and caches. Profiles that use `kind: cache` or `interface.type: http` depend on this extension.

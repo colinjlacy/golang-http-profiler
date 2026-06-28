@@ -12,14 +12,15 @@ The current draft is organized around a small core specification and extension-b
 
 Read the documents in this order:
 
-1. [Core Runtime Conditions Profile draft](fifth-draft.md)
+1. [Core Runtime Conditions Profile draft](sixth-draft.md)
 2. [Common Integrations extension](../extensions/common-integrations/README.md)
 3. [Environment Configuration extension](../extensions/env-configuration/README.md)
 4. [Extension authoring guide](guides/extension-authoring.md)
-5. [SDK integration guide](guides/sdk-integration-guide.md)
-6. [Package artifact conventions](guides/package-artifact-conventions.md)
-7. [Generator discovery and end-user workflow](guides/generator-discovery-workflow.md)
-8. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
+5. [Extension vocabulary keywords](guides/extension-vocabulary-keywords.md)
+6. [SDK integration guide](guides/sdk-integration-guide.md)
+7. [Package artifact conventions](guides/package-artifact-conventions.md)
+8. [Generator discovery and end-user workflow](guides/generator-discovery-workflow.md)
+9. [Kratix implementation proposal](core/kratix-runtime-conditions-implementation-proposal.md)
 
 The core draft should be reviewed as the specification kernel. It defines:
 

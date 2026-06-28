@@ -47,7 +47,7 @@ This repository contains:
 - `demos/kratix/` - Kratix adapter and Promise demo assets.
 - `examples/sdks/` - SDK packaging examples for package-owned manifests.
 
-The Runtime Conditions Profile specification draft lives in `docs/fifth-draft.md`.
+The Runtime Conditions Profile specification draft lives in `docs/sixth-draft.md`.
 
 The GitHub Pages reader site lives in `site/`. It is a static site that presents
 the spec, extension model, implementation guides, and end-to-end Kratix
