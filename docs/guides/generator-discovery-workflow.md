@@ -63,7 +63,29 @@ The `-extensions-root` flag is a development override for local extension defini
 
 ---
 
-# 3. Demo Walkthrough
+# 3. Java Build-Tool Workflow
+
+The Java profiler should treat Maven and Gradle as first-class package resolution sources.
+
+For Maven, the profiler starts from `pom.xml`, reads reactor modules, resolves the selected classpath through Maven, and inspects the resulting module output directories and dependency JARs.
+
+For Gradle, the profiler starts from `settings.gradle`, `settings.gradle.kts`, `build.gradle`, or `build.gradle.kts`, reads included projects, resolves the selected source set or configuration through Gradle, and inspects the resulting project outputs and dependency JARs.
+
+Java packages should expose Runtime Conditions metadata as classpath resources:
+
+```text
+META-INF/runtimeconditions/runtimeconditions.bindings.yaml
+META-INF/runtimeconditions/runtimeconditions.package.yaml
+META-INF/runtimeconditions/runtimeconditions.extension.yaml
+```
+
+The initial Java profiler implementation discovers those resources from Maven and Gradle source/resource layouts, build output directories, explicit classpath entries, and JAR files. Java AST extraction and full Maven Resolver or Gradle Tooling API integration are later layers on top of this discovery foundation.
+
+See [Java Profiler Workflow](java-profiler-workflow.md) for the detailed Java design.
+
+---
+
+# 4. Demo Walkthrough
 
 The current request logger demo imports explicit first-party declaration packages:
 
@@ -155,7 +177,7 @@ The generator still emits only the Runtime Conditions Profile. `ApplicationRelea
 
 ---
 
-# 4. Extension Dependency Resolution
+# 5. Extension Dependency Resolution
 
 Package manifests identify the extension used by generated Conditions with `extension.id`:
 
@@ -183,7 +205,7 @@ Packages do not need to physically include every transitive dependency extension
 
 ---
 
-# 5. End-User Workflow
+# 6. End-User Workflow
 
 An application developer using third-party SDK or production library support should be able to follow this workflow:
 
@@ -199,7 +221,7 @@ The end user should not need to add a separate application config file just to e
 
 ---
 
-# 6. Diagnostics
+# 7. Diagnostics
 
 Generators SHOULD produce actionable diagnostics for malformed package metadata.
 
@@ -221,7 +243,7 @@ Generators SHOULD fail before emitting a profile when a discovered manifest is m
 
 ---
 
-# 7. Dedupe and Aggregation
+# 8. Dedupe and Aggregation
 
 A generator may see the same SDK or production library method called many times.
 
@@ -242,7 +264,7 @@ If a workload calls `PutObject` in five places, the generated profile should nor
 
 ---
 
-# 8. Unsupported Integrations
+# 9. Unsupported Integrations
 
 Package manifest discovery is additive. It does not replace explicit declarations.
 

@@ -43,6 +43,7 @@ This repository contains:
 - `docs/` - the Runtime Conditions Profile specification draft and authoring guides.
 - `extensions/` - first-party extension definitions and declaration packages.
 - `go/profiler/` - the maintained Go AST profile generator.
+- `java/profiler/` - Java-native profiler work, currently focused on Maven/Gradle-aware Runtime Conditions artifact discovery.
 - `demos/apps/` - demo workloads used to exercise declaration packages and downstream adapters.
 - `demos/kratix/` - Kratix adapter and Promise demo assets.
 - `examples/sdks/` - SDK packaging examples for package-owned manifests.
@@ -75,6 +76,19 @@ go run . \
   -name request-logger-http \
   -workload-version dev
 ```
+
+## Java Profiler
+
+```sh
+javac -d /tmp/runtimeconditions-java-profiler \
+  java/profiler/src/main/java/io/runtimeconditions/profiler/*.java
+
+java -cp /tmp/runtimeconditions-java-profiler \
+  io.runtimeconditions.profiler.ProfilerCli discover \
+  --project java/profiler/src/testdata/maven-app
+```
+
+The Java profiler does not generate profiles yet. Its current slice discovers Runtime Conditions artifacts from Maven and Gradle project layouts, classpath directories, and JARs.
 
 ## Try It Out
 

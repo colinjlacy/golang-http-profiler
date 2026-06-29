@@ -1,0 +1,18 @@
+apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsPackage
+
+metadata:
+  package: io.runtimeconditions.fixtures.gradle:mapped-sdk
+  language: java
+
+extension:
+  id: https://example.com/runtimeconditions/java-gradle-fixture/v1alpha1/runtimeconditions.extension.yaml
+
+java:
+  package: io.runtimeconditions.fixtures.gradle
+  declarations:
+    - class: MappedClient
+      method: call
+      name: mapped-sdk
+      kind: java.fixture
+

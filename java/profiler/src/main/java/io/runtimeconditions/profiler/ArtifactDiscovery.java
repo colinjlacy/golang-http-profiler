@@ -1,0 +1,106 @@
+package io.runtimeconditions.profiler;
+
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.jar.JarFile;
+
+final class ArtifactDiscovery {
+    static final String RESOURCE_ROOT = "META-INF/runtimeconditions";
+    static final String BINDINGS_MANIFEST = "runtimeconditions.bindings.yaml";
+    static final String PACKAGE_MANIFEST = "runtimeconditions.package.yaml";
+    static final String EXTENSION_DEFINITION = "runtimeconditions.extension.yaml";
+
+    List<RuntimeConditionsArtifact> discoverProjectArtifacts(Path projectRoot, BuildTool buildTool) throws IOException {
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(projectRoot.resolve("src/main/resources").resolve(RESOURCE_ROOT));
+        switch (buildTool) {
+            case MAVEN -> candidates.add(projectRoot.resolve("target/classes").resolve(RESOURCE_ROOT));
+            case GRADLE -> candidates.add(projectRoot.resolve("build/resources/main").resolve(RESOURCE_ROOT));
+            case SOURCE_ONLY -> {
+            }
+        }
+        candidates.add(projectRoot);
+
+        List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
+        for (Path candidate : candidates) {
+            artifacts.addAll(discoverDirectory(candidate, "project:" + projectRoot));
+        }
+        return artifacts;
+    }
+
+    List<RuntimeConditionsArtifact> discoverClasspathArtifact(Path entry) throws IOException {
+        if (Files.isDirectory(entry)) {
+            List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
+            artifacts.addAll(discoverDirectory(entry.resolve(RESOURCE_ROOT), "classpath:" + entry));
+            artifacts.addAll(discoverDirectory(entry, "classpath:" + entry));
+            return artifacts;
+        }
+        if (Files.isRegularFile(entry) && entry.getFileName().toString().endsWith(".jar")) {
+            return discoverJar(entry);
+        }
+        return List.of();
+    }
+
+    private List<RuntimeConditionsArtifact> discoverDirectory(Path directory, String origin) {
+        if (!Files.isDirectory(directory)) {
+            return List.of();
+        }
+        Path extension = directory.resolve(EXTENSION_DEFINITION);
+        List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
+        Path bindings = directory.resolve(BINDINGS_MANIFEST);
+        if (Files.isRegularFile(bindings)) {
+            artifacts.add(new RuntimeConditionsArtifact(
+                    RuntimeConditionsArtifact.Kind.BINDING,
+                    bindings.toUri().toString(),
+                    Files.isRegularFile(extension) ? extension.toUri().toString() : null,
+                    origin,
+                    bindings));
+        }
+        Path manifest = directory.resolve(PACKAGE_MANIFEST);
+        if (Files.isRegularFile(manifest)) {
+            artifacts.add(new RuntimeConditionsArtifact(
+                    RuntimeConditionsArtifact.Kind.PACKAGE,
+                    manifest.toUri().toString(),
+                    Files.isRegularFile(extension) ? extension.toUri().toString() : null,
+                    origin,
+                    manifest));
+        }
+        return artifacts;
+    }
+
+    private List<RuntimeConditionsArtifact> discoverJar(Path jar) throws IOException {
+        List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
+        try (JarFile jarFile = new JarFile(jar.toFile())) {
+            String extension = RESOURCE_ROOT + "/" + EXTENSION_DEFINITION;
+            String bindings = RESOURCE_ROOT + "/" + BINDINGS_MANIFEST;
+            String manifest = RESOURCE_ROOT + "/" + PACKAGE_MANIFEST;
+            boolean hasExtension = jarFile.getEntry(extension) != null;
+            if (jarFile.getEntry(bindings) != null) {
+                artifacts.add(new RuntimeConditionsArtifact(
+                        RuntimeConditionsArtifact.Kind.BINDING,
+                        jarUri(jar, bindings),
+                        hasExtension ? jarUri(jar, extension) : null,
+                        "jar:" + jar,
+                        jar));
+            }
+            if (jarFile.getEntry(manifest) != null) {
+                artifacts.add(new RuntimeConditionsArtifact(
+                        RuntimeConditionsArtifact.Kind.PACKAGE,
+                        jarUri(jar, manifest),
+                        hasExtension ? jarUri(jar, extension) : null,
+                        "jar:" + jar,
+                        jar));
+            }
+        }
+        return artifacts;
+    }
+
+    private String jarUri(Path jar, String entry) {
+        return URI.create("jar:" + jar.toUri() + "!/" + entry).toString();
+    }
+}
+

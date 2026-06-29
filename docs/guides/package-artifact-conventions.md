@@ -337,7 +337,7 @@ At least one of `java.declarations` or `java.options` must be present.
 
 Generators SHOULD use language-native package resolution and then check conventional manifest locations. They SHOULD NOT recursively scan dependency trees looking for arbitrary manifest files.
 
-The current Go generator supports extraction. Java declaration packages are validated against the binding convention, but a Java extractor has not been implemented yet. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
+The current Go generator supports extraction. The Java profiler currently supports Maven/Gradle-aware artifact discovery and Java binding validation, but Java source extraction has not been implemented yet. The Python, JavaScript, and TypeScript paths below describe the intended package-resolution convention for future language support.
 
 ## 6.1 Go
 
@@ -364,14 +364,31 @@ For a Java import:
 import io.runtimeconditions.extensions.commonintegrations.Cache;
 ```
 
-A Java generator should resolve the dependency through the build tool classpath or source set and check:
+A Java generator should resolve project modules and dependencies through Maven or Gradle, then inspect only the resolved classpath artifacts and source-set outputs. It should not crawl Maven or Gradle cache directories looking for manifests.
+
+Published Java artifacts should package Runtime Conditions files as resources:
 
 ```text
-<resolved package artifact>/runtimeconditions.bindings.yaml
-<resolved package artifact>/runtimeconditions.package.yaml
+META-INF/runtimeconditions/runtimeconditions.bindings.yaml
+META-INF/runtimeconditions/runtimeconditions.package.yaml
+META-INF/runtimeconditions/runtimeconditions.extension.yaml
 ```
 
-For source-layout declaration packages in this repository, the manifest is placed next to the Java source root for the extension package.
+At source time, Maven and Gradle packages should place those files under:
+
+```text
+src/main/resources/META-INF/runtimeconditions/
+```
+
+A Java generator may also accept a package-root layout for repository-local development:
+
+```text
+runtimeconditions.bindings.yaml
+runtimeconditions.package.yaml
+runtimeconditions.extension.yaml
+```
+
+For source-layout declaration packages in this repository, the current manifest is placed next to the Java source root for the extension package. Published Java packages should use the `META-INF/runtimeconditions/` resource layout.
 
 ## 6.3 Python
 
