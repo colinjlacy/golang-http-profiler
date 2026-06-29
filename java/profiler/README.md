@@ -1,6 +1,6 @@
 # Java Profiler
 
-The Java profiler starts with build-tool-aware artifact discovery.
+The Java profiler starts with build-tool-aware artifact discovery and can generate Runtime Conditions Profiles from declarative Java binding packages.
 
 Current implementation:
 
@@ -17,43 +17,59 @@ Current implementation:
 - Validates discovered artifacts before they can be used by future extraction:
   - manifest kind and `metadata.language`
   - required Java manifest section
+  - full Java manifest structure, including constants, declarations, nested options, and YAML anchors
   - package-local `runtimeconditions.extension.yaml`
   - manifest extension ID against extension definition `metadata.id`
   - duplicate extension definitions and unresolved extension dependencies across discovered artifacts
+- Generates Runtime Conditions Profiles from `RuntimeConditionsBinding` declarative Java calls.
+- Emits profile YAML from Java declarations, nested options, enum constants, class literals, and simple Java schema classes.
+- Validates generated profiles against the resolved extension dependency closure and vocabulary before output.
 
 Not implemented yet:
 
-- Java AST or bytecode extraction.
 - Embedded Maven Resolver or Gradle Tooling API integration.
-- Profile generation.
+- SDK/runtime `RuntimeConditionsPackage` extraction.
+- Extension JSON Schema execution during generated profile validation.
 
 ## Compile and Run
 
 ```sh
-javac -d /tmp/runtimeconditions-java-profiler \
-  src/main/java/io/runtimeconditions/profiler/*.java
+mvn -q package dependency:build-classpath \
+  -Dmdep.outputFile=/tmp/runtimeconditions-java-profiler.classpath
 
-java -cp /tmp/runtimeconditions-java-profiler \
+CP="target/classes:$(cat /tmp/runtimeconditions-java-profiler.classpath)"
+
+java -cp "$CP" \
   io.runtimeconditions.profiler.ProfilerCli discover \
   --project src/testdata/maven-app \
   --resolve-build-classpath
+
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ProfilerCli generate \
+  --project src/testdata/declarative-app \
+  --classpath ../../extensions/common-integrations/java:../../extensions/env-configuration/java \
+  --name java-declarative-app \
+  --workload-uri example/java-declarative-app \
+  --workload-version test
 ```
 
 ## Test
 
 ```sh
-javac -d /tmp/runtimeconditions-java-profiler-test \
-  src/main/java/io/runtimeconditions/profiler/*.java \
-  src/test/java/io/runtimeconditions/profiler/ArtifactDiscoveryTest.java \
-  src/test/java/io/runtimeconditions/profiler/ClasspathResolverTest.java \
-  src/test/java/io/runtimeconditions/profiler/ManifestValidationTest.java
+mvn -q test-compile dependency:build-classpath \
+  -Dmdep.outputFile=/tmp/runtimeconditions-java-profiler.classpath
 
-java -cp /tmp/runtimeconditions-java-profiler-test \
+CP="target/classes:target/test-classes:$(cat /tmp/runtimeconditions-java-profiler.classpath)"
+
+java -cp "$CP" \
   io.runtimeconditions.profiler.ArtifactDiscoveryTest src/testdata
 
-java -cp /tmp/runtimeconditions-java-profiler-test \
+java -cp "$CP" \
   io.runtimeconditions.profiler.ClasspathResolverTest
 
-java -cp /tmp/runtimeconditions-java-profiler-test \
-  io.runtimeconditions.profiler.ManifestValidationTest src/testdata
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ManifestValidationTest src/testdata ../..
+
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ProfileGenerationTest ../..
 ```

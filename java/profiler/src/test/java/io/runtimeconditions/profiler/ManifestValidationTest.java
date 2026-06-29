@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -13,13 +14,16 @@ public final class ManifestValidationTest {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 1) {
-            throw new IllegalArgumentException("usage: ManifestValidationTest <testdata>");
+        if (args.length < 1 || args.length > 2) {
+            throw new IllegalArgumentException("usage: ManifestValidationTest <testdata> [repo-root]");
         }
         Path testdata = Path.of(args[0]).toAbsolutePath().normalize();
         validatesMavenBinding(testdata.resolve("maven-app"));
         validatesGradlePackage(testdata.resolve("gradle-app"));
         validatesClasspathJar();
+        if (args.length == 2) {
+            validatesRepositoryJavaBindings(Path.of(args[1]).toAbsolutePath().normalize());
+        }
         rejectsMissingExtensionDefinition();
         rejectsExtensionIdMismatch();
         rejectsUnresolvedDependency();
@@ -60,6 +64,11 @@ public final class ManifestValidationTest {
 
                     java:
                       package: io.runtimeconditions.fixtures.jar
+                      declarations:
+                        - class: Fixture
+                          function: declare
+                          nameArg: 0
+                          kind: java.fixture
                     """, """
                     apiVersion: runtimeconditions.io/v1alpha1
                     kind: RuntimeConditionsExtensionDefinition
@@ -74,6 +83,44 @@ public final class ManifestValidationTest {
         } finally {
             Files.deleteIfExists(jar);
         }
+    }
+
+    private static void validatesRepositoryJavaBindings(Path repoRoot) throws Exception {
+        ArtifactDiscovery discovery = new ArtifactDiscovery();
+        List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
+        artifacts.addAll(discovery.discoverProjectArtifacts(
+                repoRoot.resolve("extensions/common-integrations/java"),
+                BuildTool.SOURCE_ONLY));
+        artifacts.addAll(discovery.discoverProjectArtifacts(
+                repoRoot.resolve("extensions/env-configuration/java"),
+                BuildTool.SOURCE_ONLY));
+
+        List<ValidatedRuntimeConditionsArtifact> validated = new ArtifactValidator().validate(artifacts);
+        assertEquals(2, validated.size(), "repository Java bindings should expose two artifacts");
+        for (ValidatedRuntimeConditionsArtifact artifact : validated) {
+            assertTrue(artifact.diagnostics().isEmpty(), "repository Java binding should be valid: " + artifact.diagnostics());
+        }
+
+        ValidatedRuntimeConditionsArtifact common = findArtifact(
+                validated,
+                "https://runtimeconditions.io/extensions/common-integrations/v1alpha1/runtimeconditions.extension.yaml");
+        ValidatedRuntimeConditionsArtifact env = findArtifact(
+                validated,
+                "https://runtimeconditions.io/extensions/env-configuration/v1alpha1/runtimeconditions.extension.yaml");
+
+        assertEquals("io.runtimeconditions.extensions.commonintegrations", common.javaManifest().packageName(), "common package");
+        assertEquals(10, common.javaManifest().constants().size(), "common constants");
+        assertEquals(3, common.javaManifest().declarations().size(), "common declarations");
+        JavaSymbolMapping api = common.javaManifest().declarations().get(0);
+        assertEquals(9, api.options().size(), "api declaration options");
+        assertEquals(2, api.options().get(1).options().size(), "anchored schema options should resolve for GET");
+        assertEquals(2, api.options().get(2).options().size(), "anchored schema options should resolve for HEAD");
+
+        assertEquals("io.runtimeconditions.extensions.envconfiguration", env.javaManifest().packageName(), "env package");
+        assertEquals(2, env.javaManifest().options().size(), "env options");
+        assertEquals(3, env.javaManifest().options().get(0).appliesToKinds().size(), "env appliesToKinds");
+        assertEquals(3, env.javaManifest().options().get(1).appliesToKinds().size(), "anchored appliesToKinds should resolve");
+        assertEquals(2, env.javaManifest().options().get(1).options().get(0).stringArgs().size(), "anchored stringArgs should resolve");
     }
 
     private static void rejectsMissingExtensionDefinition() throws Exception {
@@ -159,6 +206,17 @@ public final class ManifestValidationTest {
 
     private static Path runtimeConditionsResourceRoot(Path root) {
         return root.resolve("src/main/resources").resolve(ArtifactDiscovery.RESOURCE_ROOT);
+    }
+
+    private static ValidatedRuntimeConditionsArtifact findArtifact(
+            List<ValidatedRuntimeConditionsArtifact> artifacts,
+            String extensionId) {
+        for (ValidatedRuntimeConditionsArtifact artifact : artifacts) {
+            if (extensionId.equals(artifact.manifestExtensionId())) {
+                return artifact;
+            }
+        }
+        throw new AssertionError("missing artifact for " + extensionId);
     }
 
     private static void writeJar(Path jar, String manifest, String extension) throws IOException {

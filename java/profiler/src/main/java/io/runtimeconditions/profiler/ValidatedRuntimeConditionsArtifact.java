@@ -9,6 +9,8 @@ final class ValidatedRuntimeConditionsArtifact {
     private final String manifestExtensionId;
     private final String extensionId;
     private final String extensionDefinitionUri;
+    private final ExtensionDefinitionModel extensionDefinition;
+    private final JavaManifestModel javaManifest;
     private final List<String> dependencies;
     private final List<RuntimeConditionsDiagnostic> diagnostics;
 
@@ -17,12 +19,16 @@ final class ValidatedRuntimeConditionsArtifact {
             String manifestExtensionId,
             String extensionId,
             String extensionDefinitionUri,
+            ExtensionDefinitionModel extensionDefinition,
+            JavaManifestModel javaManifest,
             List<String> dependencies,
             List<RuntimeConditionsDiagnostic> diagnostics) {
         this.artifact = Objects.requireNonNull(artifact, "artifact");
         this.manifestExtensionId = manifestExtensionId;
         this.extensionId = extensionId;
         this.extensionDefinitionUri = extensionDefinitionUri;
+        this.extensionDefinition = extensionDefinition;
+        this.javaManifest = javaManifest;
         this.dependencies = List.copyOf(dependencies);
         this.diagnostics = new ArrayList<>(diagnostics);
     }
@@ -41,6 +47,14 @@ final class ValidatedRuntimeConditionsArtifact {
 
     String extensionDefinitionUri() {
         return extensionDefinitionUri;
+    }
+
+    ExtensionDefinitionModel extensionDefinition() {
+        return extensionDefinition;
+    }
+
+    JavaManifestModel javaManifest() {
+        return javaManifest;
     }
 
     List<String> dependencies() {

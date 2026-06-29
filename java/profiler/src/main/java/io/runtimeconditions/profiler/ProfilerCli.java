@@ -1,5 +1,6 @@
 package io.runtimeconditions.profiler;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,7 +14,49 @@ public final class ProfilerCli {
             discover(args.length == 0 ? new String[0] : dropFirst(args));
             return;
         }
+        if ("generate".equals(args[0])) {
+            generate(dropFirst(args));
+            return;
+        }
         throw new IllegalArgumentException("unknown command: " + args[0]);
+    }
+
+    private static void generate(String[] args) throws Exception {
+        Path project = Path.of(".");
+        List<Path> classpath = new ArrayList<>();
+        boolean resolveBuildClasspath = false;
+        String name = "";
+        String workloadUri = "";
+        String workloadVersion = "dev";
+        Path out = null;
+        for (int i = 0; i < args.length; i++) {
+            switch (args[i]) {
+                case "--project" -> project = Path.of(requireValue(args, ++i, "--project"));
+                case "--classpath" -> classpath.addAll(splitClasspath(requireValue(args, ++i, "--classpath")));
+                case "--resolve-build-classpath" -> resolveBuildClasspath = true;
+                case "--name" -> name = requireValue(args, ++i, "--name");
+                case "--workload-uri" -> workloadUri = requireValue(args, ++i, "--workload-uri");
+                case "--workload-version" -> workloadVersion = requireValue(args, ++i, "--workload-version");
+                case "--out" -> out = Path.of(requireValue(args, ++i, "--out"));
+                default -> throw new IllegalArgumentException("unknown flag: " + args[i]);
+            }
+        }
+
+        Path root = project.toAbsolutePath().normalize();
+        String profileName = name.isBlank() ? root.getFileName().toString() : name;
+        String uri = workloadUri.isBlank() ? root.toString() : workloadUri;
+        String yaml = ProfileYamlWriter.write(new JavaProfileExtractor().extract(
+                root,
+                new JavaProfileOptions(
+                        profileName,
+                        uri,
+                        workloadVersion,
+                        new DiscoveryOptions(classpath, resolveBuildClasspath))));
+        if (out == null) {
+            System.out.print(yaml);
+        } else {
+            Files.writeString(out, yaml);
+        }
     }
 
     private static void discover(String[] args) throws Exception {
@@ -87,7 +130,11 @@ public final class ProfilerCli {
             System.out.println("validatedArtifact: kind=" + artifact.artifact().kind().name().toLowerCase()
                     + " manifestExtensionId=" + nullToEmpty(artifact.manifestExtensionId())
                     + " extensionId=" + nullToEmpty(artifact.extensionId())
-                    + " extensionDefinition=" + nullToEmpty(artifact.extensionDefinitionUri()));
+                    + " extensionDefinition=" + nullToEmpty(artifact.extensionDefinitionUri())
+                    + " javaPackage=" + javaPackage(artifact)
+                    + " declarations=" + declarationCount(artifact)
+                    + " options=" + optionCount(artifact)
+                    + " constants=" + constantCount(artifact));
         }
         for (RuntimeConditionsDiagnostic diagnostic : result.diagnostics()) {
             System.out.println("diagnostic: severity=" + diagnostic.severity().name().toLowerCase()
@@ -146,6 +193,11 @@ public final class ProfilerCli {
                 out.append("\"").append(json(validated.dependencies().get(d))).append("\"");
             }
             out.append("]");
+            out.append(", \"javaPackage\": ");
+            appendJsonNullable(out, javaPackageNullable(validated));
+            out.append(", \"declarations\": ").append(declarationCount(validated));
+            out.append(", \"options\": ").append(optionCount(validated));
+            out.append(", \"constants\": ").append(constantCount(validated));
             out.append("}");
             if (i + 1 < result.artifacts().size()) {
                 out.append(",");
@@ -179,6 +231,31 @@ public final class ProfilerCli {
         } else {
             out.append("\"").append(json(value)).append("\"");
         }
+    }
+
+    private static String javaPackage(ValidatedRuntimeConditionsArtifact artifact) {
+        String value = javaPackageNullable(artifact);
+        return value == null ? "" : value;
+    }
+
+    private static String javaPackageNullable(ValidatedRuntimeConditionsArtifact artifact) {
+        JavaManifestModel manifest = artifact.javaManifest();
+        return manifest == null ? null : manifest.packageName();
+    }
+
+    private static int declarationCount(ValidatedRuntimeConditionsArtifact artifact) {
+        JavaManifestModel manifest = artifact.javaManifest();
+        return manifest == null ? 0 : manifest.declarations().size();
+    }
+
+    private static int optionCount(ValidatedRuntimeConditionsArtifact artifact) {
+        JavaManifestModel manifest = artifact.javaManifest();
+        return manifest == null ? 0 : manifest.options().size();
+    }
+
+    private static int constantCount(ValidatedRuntimeConditionsArtifact artifact) {
+        JavaManifestModel manifest = artifact.javaManifest();
+        return manifest == null ? 0 : manifest.constants().size();
     }
 
     private static String nullToEmpty(String value) {

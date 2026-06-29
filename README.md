@@ -80,16 +80,22 @@ go run . \
 ## Java Profiler
 
 ```sh
-javac -d /tmp/runtimeconditions-java-profiler \
-  java/profiler/src/main/java/io/runtimeconditions/profiler/*.java
+cd java/profiler
+mvn -q package dependency:build-classpath \
+  -Dmdep.outputFile=/tmp/runtimeconditions-java-profiler.classpath
 
-java -cp /tmp/runtimeconditions-java-profiler \
-  io.runtimeconditions.profiler.ProfilerCli discover \
-  --project java/profiler/src/testdata/maven-app \
-  --resolve-build-classpath
+CP="target/classes:$(cat /tmp/runtimeconditions-java-profiler.classpath)"
+
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ProfilerCli generate \
+  --project src/testdata/declarative-app \
+  --classpath ../../extensions/common-integrations/java:../../extensions/env-configuration/java \
+  --name java-declarative-app \
+  --workload-uri example/java-declarative-app \
+  --workload-version test
 ```
 
-The Java profiler does not generate profiles yet. Its current slice discovers Runtime Conditions artifacts from Maven and Gradle project layouts, resolved classpath directories, and JARs.
+The Java profiler currently generates profiles from declarative Java binding packages. SDK/runtime package extraction is intentionally not implemented yet.
 
 ## Try It Out
 

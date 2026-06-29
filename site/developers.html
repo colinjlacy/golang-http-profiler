@@ -218,7 +218,7 @@ conditions:
         <section class="section">
           <h2>7. Java starts from Maven and Gradle artifacts</h2>
           <p class="short">
-            Java profile generation is not implemented yet. The Java profiler foundation discovers Runtime Conditions metadata from Maven and Gradle project layouts, resolved classpath directories, and JAR resources before any Java AST extraction is attempted.
+            The Java profiler discovers Runtime Conditions metadata from Maven and Gradle project layouts, resolved classpath directories, and JAR resources. It currently generates profiles from declarative Java binding packages; SDK/runtime package extraction is intentionally deferred.
           </p>
           <div class="example">
             <div class="example-title">Java artifact resource layout</div>
@@ -227,14 +227,20 @@ META-INF/runtimeconditions/runtimeconditions.package.yaml
 META-INF/runtimeconditions/runtimeconditions.extension.yaml</code></pre>
           </div>
           <div class="example">
-            <div class="example-title">Discovery command</div>
-            <pre><code>javac -d /tmp/runtimeconditions-java-profiler \
-  java/profiler/src/main/java/io/runtimeconditions/profiler/*.java
+            <div class="example-title">Profile generation command</div>
+            <pre><code>cd java/profiler
+mvn -q package dependency:build-classpath \
+  -Dmdep.outputFile=/tmp/runtimeconditions-java-profiler.classpath
 
-java -cp /tmp/runtimeconditions-java-profiler \
-  io.runtimeconditions.profiler.ProfilerCli discover \
-  --project java/profiler/src/testdata/maven-app \
-  --resolve-build-classpath</code></pre>
+CP="target/classes:$(cat /tmp/runtimeconditions-java-profiler.classpath)"
+
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ProfilerCli generate \
+  --project src/testdata/declarative-app \
+  --classpath ../../extensions/common-integrations/java:../../extensions/env-configuration/java \
+  --name java-declarative-app \
+  --workload-uri example/java-declarative-app \
+  --workload-version test</code></pre>
           </div>
         </section>
 

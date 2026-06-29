@@ -32,11 +32,13 @@ final class ArtifactValidator {
         String manifestExtensionId = null;
         String extensionId = null;
         String extensionDefinitionUri = null;
+        ExtensionDefinitionModel extensionDefinition = null;
+        JavaManifestModel javaManifest = null;
         List<String> dependencies = List.of();
-        MinimalYamlDocument manifest = null;
+        YamlDocument manifest = null;
 
         try {
-            manifest = MinimalYamlDocument.parse(readResource(artifact.manifestUri()));
+            manifest = YamlDocument.parse(readResource(artifact.manifestUri()));
         } catch (IOException | IllegalArgumentException e) {
             diagnostics.add(error("package-manifest", artifact.manifestUri(), "failed to read manifest: " + e.getMessage()));
         }
@@ -48,6 +50,8 @@ final class ArtifactValidator {
             validateRequiredValue(manifest.scalar("metadata", "language"), LANGUAGE, "metadata.language", artifact.manifestUri(), diagnostics);
             if (!manifest.hasSection(LANGUAGE)) {
                 diagnostics.add(error("package-language", artifact.manifestUri(), "java section is required"));
+            } else {
+                javaManifest = new JavaManifestParser().parse(manifest, artifact.manifestUri(), diagnostics);
             }
 
             if (artifact.kind() == RuntimeConditionsArtifact.Kind.BINDING) {
@@ -70,12 +74,13 @@ final class ArtifactValidator {
 
         if (extensionDefinitionUri != null) {
             try {
-                MinimalYamlDocument extension = MinimalYamlDocument.parse(readResource(extensionDefinitionUri));
+                YamlDocument extension = YamlDocument.parse(readResource(extensionDefinitionUri));
                 validateRequiredValue(extension.scalar("apiVersion"), API_VERSION, "apiVersion", extensionDefinitionUri, diagnostics);
                 validateRequiredValue(extension.scalar("kind"), EXTENSION_KIND, "kind", extensionDefinitionUri, diagnostics);
                 extensionId = requireScalar(extension, extensionDefinitionUri, diagnostics, "metadata", "id");
                 validateExtensionId(extensionId, extensionDefinitionUri, diagnostics);
-                dependencies = extension.sequence("spec", "dependencies");
+                extensionDefinition = ExtensionDefinitionModel.parse(extension, extensionDefinitionUri, diagnostics);
+                dependencies = extension.stringList("spec", "dependencies");
             } catch (IOException | IllegalArgumentException e) {
                 diagnostics.add(error("extension-definition", extensionDefinitionUri, "failed to read extension definition: " + e.getMessage()));
             }
@@ -93,6 +98,8 @@ final class ArtifactValidator {
                 manifestExtensionId,
                 extensionId,
                 extensionDefinitionUri,
+                extensionDefinition,
+                javaManifest,
                 dependencies,
                 diagnostics);
     }
@@ -181,7 +188,7 @@ final class ArtifactValidator {
     }
 
     private String requireScalar(
-            MinimalYamlDocument document,
+            YamlDocument document,
             String source,
             List<RuntimeConditionsDiagnostic> diagnostics,
             String... path) {
