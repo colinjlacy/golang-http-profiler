@@ -19,17 +19,21 @@ public final class ProfilerCli {
     private static void discover(String[] args) throws Exception {
         Path project = Path.of(".");
         List<Path> classpath = new ArrayList<>();
+        boolean resolveBuildClasspath = false;
         boolean json = false;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--project" -> project = Path.of(requireValue(args, ++i, "--project"));
                 case "--classpath" -> classpath.addAll(splitClasspath(requireValue(args, ++i, "--classpath")));
+                case "--resolve-build-classpath" -> resolveBuildClasspath = true;
                 case "--json" -> json = true;
                 default -> throw new IllegalArgumentException("unknown flag: " + args[i]);
             }
         }
 
-        DiscoveryResult result = new JavaProjectDiscovery().discover(project, classpath);
+        DiscoveryResult result = new JavaProjectDiscovery().discover(
+                project,
+                new DiscoveryOptions(classpath, resolveBuildClasspath));
         if (json) {
             printJson(result);
             return;
@@ -70,11 +74,26 @@ public final class ProfilerCli {
         for (Path module : result.modules()) {
             System.out.println("module: " + module);
         }
+        for (Path classpathEntry : result.classpathEntries()) {
+            System.out.println("classpath: " + classpathEntry);
+        }
         for (RuntimeConditionsArtifact artifact : result.artifacts()) {
             System.out.println("artifact: kind=" + artifact.kind().name().toLowerCase()
                     + " manifest=" + artifact.manifestUri()
                     + " extension=" + nullToEmpty(artifact.extensionUri())
                     + " origin=" + artifact.origin());
+        }
+        for (ValidatedRuntimeConditionsArtifact artifact : result.validatedArtifacts()) {
+            System.out.println("validatedArtifact: kind=" + artifact.artifact().kind().name().toLowerCase()
+                    + " manifestExtensionId=" + nullToEmpty(artifact.manifestExtensionId())
+                    + " extensionId=" + nullToEmpty(artifact.extensionId())
+                    + " extensionDefinition=" + nullToEmpty(artifact.extensionDefinitionUri()));
+        }
+        for (RuntimeConditionsDiagnostic diagnostic : result.diagnostics()) {
+            System.out.println("diagnostic: severity=" + diagnostic.severity().name().toLowerCase()
+                    + " code=" + diagnostic.code()
+                    + " source=" + diagnostic.source()
+                    + " message=" + diagnostic.message());
         }
     }
 
@@ -91,6 +110,14 @@ public final class ProfilerCli {
             out.append("\"").append(json(result.modules().get(i).toString())).append("\"");
         }
         out.append("],\n");
+        out.append("  \"classpath\": [");
+        for (int i = 0; i < result.classpathEntries().size(); i++) {
+            if (i > 0) {
+                out.append(", ");
+            }
+            out.append("\"").append(json(result.classpathEntries().get(i).toString())).append("\"");
+        }
+        out.append("],\n");
         out.append("  \"artifacts\": [\n");
         for (int i = 0; i < result.artifacts().size(); i++) {
             RuntimeConditionsArtifact artifact = result.artifacts().get(i);
@@ -104,8 +131,39 @@ public final class ProfilerCli {
                 out.append("\"").append(json(artifact.extensionUri())).append("\"");
             }
             out.append(", \"origin\": \"").append(json(artifact.origin())).append("\"");
+            ValidatedRuntimeConditionsArtifact validated = result.validatedArtifacts().get(i);
+            out.append(", \"manifestExtensionId\": ");
+            appendJsonNullable(out, validated.manifestExtensionId());
+            out.append(", \"extensionId\": ");
+            appendJsonNullable(out, validated.extensionId());
+            out.append(", \"extensionDefinition\": ");
+            appendJsonNullable(out, validated.extensionDefinitionUri());
+            out.append(", \"dependencies\": [");
+            for (int d = 0; d < validated.dependencies().size(); d++) {
+                if (d > 0) {
+                    out.append(", ");
+                }
+                out.append("\"").append(json(validated.dependencies().get(d))).append("\"");
+            }
+            out.append("]");
             out.append("}");
             if (i + 1 < result.artifacts().size()) {
+                out.append(",");
+            }
+            out.append("\n");
+        }
+        out.append("  ],\n");
+        out.append("  \"diagnostics\": [\n");
+        List<RuntimeConditionsDiagnostic> diagnostics = result.diagnostics();
+        for (int i = 0; i < diagnostics.size(); i++) {
+            RuntimeConditionsDiagnostic diagnostic = diagnostics.get(i);
+            out.append("    {");
+            out.append("\"severity\": \"").append(diagnostic.severity().name().toLowerCase()).append("\", ");
+            out.append("\"code\": \"").append(json(diagnostic.code())).append("\", ");
+            out.append("\"source\": \"").append(json(diagnostic.source())).append("\", ");
+            out.append("\"message\": \"").append(json(diagnostic.message())).append("\"");
+            out.append("}");
+            if (i + 1 < diagnostics.size()) {
                 out.append(",");
             }
             out.append("\n");
@@ -113,6 +171,14 @@ public final class ProfilerCli {
         out.append("  ]\n");
         out.append("}\n");
         System.out.print(out);
+    }
+
+    private static void appendJsonNullable(StringBuilder out, String value) {
+        if (value == null) {
+            out.append("null");
+        } else {
+            out.append("\"").append(json(value)).append("\"");
+        }
     }
 
     private static String nullToEmpty(String value) {
@@ -123,4 +189,3 @@ public final class ProfilerCli {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }
-

@@ -15,13 +15,13 @@ final class ArtifactDiscovery {
     static final String EXTENSION_DEFINITION = "runtimeconditions.extension.yaml";
 
     List<RuntimeConditionsArtifact> discoverProjectArtifacts(Path projectRoot, BuildTool buildTool) throws IOException {
+        return discoverProjectArtifacts(projectRoot, buildTool, true);
+    }
+
+    List<RuntimeConditionsArtifact> discoverProjectArtifacts(Path projectRoot, BuildTool buildTool, boolean includeSourceLayout) throws IOException {
         List<Path> candidates = new ArrayList<>();
-        candidates.add(projectRoot.resolve("src/main/resources").resolve(RESOURCE_ROOT));
-        switch (buildTool) {
-            case MAVEN -> candidates.add(projectRoot.resolve("target/classes").resolve(RESOURCE_ROOT));
-            case GRADLE -> candidates.add(projectRoot.resolve("build/resources/main").resolve(RESOURCE_ROOT));
-            case SOURCE_ONLY -> {
-            }
+        if (includeSourceLayout) {
+            candidates.add(projectRoot.resolve("src/main/resources").resolve(RESOURCE_ROOT));
         }
         candidates.add(projectRoot);
 
@@ -103,4 +103,3 @@ final class ArtifactDiscovery {
         return URI.create("jar:" + jar.toUri() + "!/" + entry).toString();
     }
 }
-

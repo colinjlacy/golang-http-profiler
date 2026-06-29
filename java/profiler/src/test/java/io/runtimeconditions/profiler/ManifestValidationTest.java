@@ -1,0 +1,211 @@
+package io.runtimeconditions.profiler;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+
+public final class ManifestValidationTest {
+    private ManifestValidationTest() {
+    }
+
+    public static void main(String[] args) throws Exception {
+        if (args.length != 1) {
+            throw new IllegalArgumentException("usage: ManifestValidationTest <testdata>");
+        }
+        Path testdata = Path.of(args[0]).toAbsolutePath().normalize();
+        validatesMavenBinding(testdata.resolve("maven-app"));
+        validatesGradlePackage(testdata.resolve("gradle-app"));
+        validatesClasspathJar();
+        rejectsMissingExtensionDefinition();
+        rejectsExtensionIdMismatch();
+        rejectsUnresolvedDependency();
+    }
+
+    private static void validatesMavenBinding(Path root) throws Exception {
+        DiscoveryResult result = new JavaProjectDiscovery().discover(root, List.of());
+        assertFalse(result.hasErrors(), "Maven binding fixture should be valid: " + diagnostics(result));
+        ValidatedRuntimeConditionsArtifact artifact = result.validatedArtifacts().get(0);
+        assertEquals(
+                "https://example.com/runtimeconditions/java-maven-fixture/v1alpha1/runtimeconditions.extension.yaml",
+                artifact.manifestExtensionId(),
+                "Maven manifest extension id");
+        assertEquals(artifact.manifestExtensionId(), artifact.extensionId(), "Maven extension id match");
+    }
+
+    private static void validatesGradlePackage(Path root) throws Exception {
+        DiscoveryResult result = new JavaProjectDiscovery().discover(root, List.of());
+        assertFalse(result.hasErrors(), "Gradle package fixture should be valid: " + diagnostics(result));
+        ValidatedRuntimeConditionsArtifact artifact = result.validatedArtifacts().get(0);
+        assertEquals(
+                "https://example.com/runtimeconditions/java-gradle-fixture/v1alpha1/runtimeconditions.extension.yaml",
+                artifact.manifestExtensionId(),
+                "Gradle manifest extension id");
+        assertEquals(artifact.manifestExtensionId(), artifact.extensionId(), "Gradle extension id match");
+    }
+
+    private static void validatesClasspathJar() throws Exception {
+        Path jar = Files.createTempFile("runtimeconditions-valid-artifact", ".jar");
+        try {
+            writeJar(jar, """
+                    apiVersion: runtimeconditions.io/v1alpha1
+                    kind: RuntimeConditionsBinding
+
+                    metadata:
+                      extension: https://example.com/runtimeconditions/java-jar-fixture/v1alpha1/runtimeconditions.extension.yaml
+                      language: java
+
+                    java:
+                      package: io.runtimeconditions.fixtures.jar
+                    """, """
+                    apiVersion: runtimeconditions.io/v1alpha1
+                    kind: RuntimeConditionsExtensionDefinition
+
+                    metadata:
+                      id: https://example.com/runtimeconditions/java-jar-fixture/v1alpha1/runtimeconditions.extension.yaml
+                    """);
+            List<RuntimeConditionsArtifact> artifacts = new ArtifactDiscovery().discoverClasspathArtifact(jar);
+            List<ValidatedRuntimeConditionsArtifact> validated = new ArtifactValidator().validate(artifacts);
+            assertEquals(1, validated.size(), "JAR should validate one artifact");
+            assertTrue(validated.get(0).diagnostics().isEmpty(), "JAR artifact should be valid: " + validated.get(0).diagnostics());
+        } finally {
+            Files.deleteIfExists(jar);
+        }
+    }
+
+    private static void rejectsMissingExtensionDefinition() throws Exception {
+        Path root = Files.createTempDirectory("runtimeconditions-missing-extension");
+        Path resourceRoot = runtimeConditionsResourceRoot(root);
+        Files.createDirectories(resourceRoot);
+        Files.writeString(resourceRoot.resolve("runtimeconditions.bindings.yaml"), """
+                apiVersion: runtimeconditions.io/v1alpha1
+                kind: RuntimeConditionsBinding
+
+                metadata:
+                  extension: https://example.com/runtimeconditions/missing-extension/v1alpha1/runtimeconditions.extension.yaml
+                  language: java
+
+                java:
+                  package: io.runtimeconditions.fixtures.missing
+                """);
+
+        DiscoveryResult result = new JavaProjectDiscovery().discover(root, List.of());
+        assertTrue(result.hasErrors(), "missing extension definition should fail");
+        assertDiagnosticContains(result, "runtimeconditions.extension.yaml is required next to the manifest");
+    }
+
+    private static void rejectsExtensionIdMismatch() throws Exception {
+        Path root = Files.createTempDirectory("runtimeconditions-id-mismatch");
+        Path resourceRoot = runtimeConditionsResourceRoot(root);
+        Files.createDirectories(resourceRoot);
+        Files.writeString(resourceRoot.resolve("runtimeconditions.bindings.yaml"), """
+                apiVersion: runtimeconditions.io/v1alpha1
+                kind: RuntimeConditionsBinding
+
+                metadata:
+                  extension: https://example.com/runtimeconditions/manifest/v1alpha1/runtimeconditions.extension.yaml
+                  language: java
+
+                java:
+                  package: io.runtimeconditions.fixtures.mismatch
+                """);
+        Files.writeString(resourceRoot.resolve("runtimeconditions.extension.yaml"), """
+                apiVersion: runtimeconditions.io/v1alpha1
+                kind: RuntimeConditionsExtensionDefinition
+
+                metadata:
+                  id: https://example.com/runtimeconditions/definition/v1alpha1/runtimeconditions.extension.yaml
+                """);
+
+        DiscoveryResult result = new JavaProjectDiscovery().discover(root, List.of());
+        assertTrue(result.hasErrors(), "extension id mismatch should fail");
+        assertDiagnosticContains(result, "does not match extension definition");
+    }
+
+    private static void rejectsUnresolvedDependency() throws Exception {
+        Path root = Files.createTempDirectory("runtimeconditions-missing-dependency");
+        Path resourceRoot = runtimeConditionsResourceRoot(root);
+        Files.createDirectories(resourceRoot);
+        Files.writeString(resourceRoot.resolve("runtimeconditions.bindings.yaml"), """
+                apiVersion: runtimeconditions.io/v1alpha1
+                kind: RuntimeConditionsBinding
+
+                metadata:
+                  extension: https://example.com/runtimeconditions/with-dependency/v1alpha1/runtimeconditions.extension.yaml
+                  language: java
+
+                java:
+                  package: io.runtimeconditions.fixtures.dependency
+                """);
+        Files.writeString(resourceRoot.resolve("runtimeconditions.extension.yaml"), """
+                apiVersion: runtimeconditions.io/v1alpha1
+                kind: RuntimeConditionsExtensionDefinition
+
+                metadata:
+                  id: https://example.com/runtimeconditions/with-dependency/v1alpha1/runtimeconditions.extension.yaml
+
+                spec:
+                  dependencies:
+                    - https://example.com/runtimeconditions/missing-dependency/v1alpha1/runtimeconditions.extension.yaml
+                """);
+
+        DiscoveryResult result = new JavaProjectDiscovery().discover(root, List.of());
+        assertTrue(result.hasErrors(), "unresolved dependency should fail");
+        assertDiagnosticContains(result, "cannot be resolved from discovered Runtime Conditions artifacts");
+    }
+
+    private static Path runtimeConditionsResourceRoot(Path root) {
+        return root.resolve("src/main/resources").resolve(ArtifactDiscovery.RESOURCE_ROOT);
+    }
+
+    private static void writeJar(Path jar, String manifest, String extension) throws IOException {
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+            writeJarEntry(out, "META-INF/runtimeconditions/runtimeconditions.bindings.yaml", manifest);
+            writeJarEntry(out, "META-INF/runtimeconditions/runtimeconditions.extension.yaml", extension);
+        }
+    }
+
+    private static void writeJarEntry(JarOutputStream out, String name, String content) throws IOException {
+        out.putNextEntry(new JarEntry(name));
+        out.write(content.getBytes(StandardCharsets.UTF_8));
+        out.closeEntry();
+    }
+
+    private static void assertDiagnosticContains(DiscoveryResult result, String expected) {
+        if (result.diagnostics().stream().noneMatch(diagnostic -> diagnostic.message().contains(expected))) {
+            throw new AssertionError("expected diagnostic containing " + expected + ", got " + diagnostics(result));
+        }
+    }
+
+    private static String diagnostics(DiscoveryResult result) {
+        StringBuilder out = new StringBuilder();
+        for (RuntimeConditionsDiagnostic diagnostic : result.diagnostics()) {
+            if (out.length() > 0) {
+                out.append("; ");
+            }
+            out.append(diagnostic.message());
+        }
+        return out.toString();
+    }
+
+    private static void assertEquals(Object expected, Object actual, String message) {
+        if (!expected.equals(actual)) {
+            throw new AssertionError(message + ": expected " + expected + ", got " + actual);
+        }
+    }
+
+    private static void assertFalse(boolean value, String message) {
+        if (value) {
+            throw new AssertionError(message);
+        }
+    }
+
+    private static void assertTrue(boolean value, String message) {
+        if (!value) {
+            throw new AssertionError(message);
+        }
+    }
+}

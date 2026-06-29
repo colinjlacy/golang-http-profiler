@@ -85,10 +85,11 @@ javac -d /tmp/runtimeconditions-java-profiler \
 
 java -cp /tmp/runtimeconditions-java-profiler \
   io.runtimeconditions.profiler.ProfilerCli discover \
-  --project java/profiler/src/testdata/maven-app
+  --project java/profiler/src/testdata/maven-app \
+  --resolve-build-classpath
 ```
 
-The Java profiler does not generate profiles yet. Its current slice discovers Runtime Conditions artifacts from Maven and Gradle project layouts, classpath directories, and JARs.
+The Java profiler does not generate profiles yet. Its current slice discovers Runtime Conditions artifacts from Maven and Gradle project layouts, resolved classpath directories, and JARs.
 
 ## Try It Out
 

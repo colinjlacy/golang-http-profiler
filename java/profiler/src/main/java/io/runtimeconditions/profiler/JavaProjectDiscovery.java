@@ -5,7 +5,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.XMLConstants;
@@ -19,6 +21,10 @@ final class JavaProjectDiscovery {
     private static final Pattern GRADLE_PROJECT = Pattern.compile("['\"]:?(.*?)['\"]");
 
     DiscoveryResult discover(Path projectRoot, List<Path> classpathEntries) throws IOException {
+        return discover(projectRoot, new DiscoveryOptions(classpathEntries, false));
+    }
+
+    DiscoveryResult discover(Path projectRoot, DiscoveryOptions options) throws IOException {
         Path root = projectRoot.toAbsolutePath().normalize();
         BuildTool buildTool = detectBuildTool(root);
         List<Path> modules = discoverModules(root, buildTool);
@@ -26,15 +32,27 @@ final class JavaProjectDiscovery {
         artifactRoots.add(root);
         artifactRoots.addAll(modules);
 
+        Set<Path> resolvedClasspath = new LinkedHashSet<>();
+        if (options.resolveBuildClasspath()) {
+            resolvedClasspath.addAll(new BuildToolClasspathResolver().resolve(root, buildTool, modules));
+        }
+        for (Path entry : options.classpathEntries()) {
+            resolvedClasspath.add(entry.toAbsolutePath().normalize());
+        }
+
         ArtifactDiscovery artifactDiscovery = new ArtifactDiscovery();
         List<RuntimeConditionsArtifact> artifacts = new ArrayList<>();
         for (Path artifactRoot : artifactRoots) {
-            artifacts.addAll(artifactDiscovery.discoverProjectArtifacts(artifactRoot, buildTool));
+            artifacts.addAll(artifactDiscovery.discoverProjectArtifacts(
+                    artifactRoot,
+                    buildTool,
+                    !options.resolveBuildClasspath()));
         }
-        for (Path classpathEntry : classpathEntries) {
-            artifacts.addAll(artifactDiscovery.discoverClasspathArtifact(classpathEntry.toAbsolutePath().normalize()));
+        for (Path classpathEntry : resolvedClasspath) {
+            artifacts.addAll(artifactDiscovery.discoverClasspathArtifact(classpathEntry));
         }
-        return new DiscoveryResult(root, buildTool, modules, artifacts);
+        List<ValidatedRuntimeConditionsArtifact> validatedArtifacts = new ArtifactValidator().validate(artifacts);
+        return new DiscoveryResult(root, buildTool, modules, List.copyOf(resolvedClasspath), artifacts, validatedArtifacts);
     }
 
     private BuildTool detectBuildTool(Path root) {

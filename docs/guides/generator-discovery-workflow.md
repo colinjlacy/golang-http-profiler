@@ -4,13 +4,15 @@
 
 **Non-normative implementation guidance**
 
-This guide documents how a first-party generator discovers Runtime Conditions manifests from imported packages and how an end user benefits from those manifests when generating workload profiles.
+This guide documents how first-party generators discover Runtime Conditions metadata from language packages and how an end user benefits from those manifests when generating workload profiles.
 
 ---
 
-# 1. Discovery Model
+# 1. Shared Discovery Model
 
-Generators should discover Runtime Conditions metadata from packages resolved by the language-native toolchain and package manager. They should inspect the packages that can contribute source-level declarations or SDK and production library mappings, not crawl arbitrary dependency cache directories looking for manifests.
+Generators should start from the workload's language-native project model: package manager metadata, build tool configuration, source sets, import resolution, and dependency overrides. They should inspect packages and artifacts that can contribute source-level declarations, SDK mappings, or production library mappings. They should not crawl arbitrary dependency cache directories looking for Runtime Conditions manifests.
+
+Each language profiler should be native to that language's tooling model. Shared behavior belongs in extension definitions, binding/package manifests, dependency resolution, profile validation, and cross-language fixtures. A Go profiler should not parse Java source; a Java profiler should not depend on Go AST behavior.
 
 A generator may discover two manifest types:
 
@@ -23,14 +25,14 @@ The intended flow is:
 
 ```mermaid
 flowchart LR
-  Source["Workload source code"] --> Imports["Collect relevant imports"]
-  Imports --> Resolve["Resolve packages through language toolchain"]
-  Resolve --> Manifest["Check conventional manifest path"]
+  Source["Workload source code"] --> Project["Language project metadata"]
+  Project --> Resolve["Resolve packages or artifacts"]
+  Resolve --> Manifest["Check conventional manifest locations"]
   Manifest --> Extension["Load package extension definition"]
   Extension --> Dependencies["Resolve extension dependencies"]
-  Dependencies --> Validate["Validate resolved extension set"]
-  Source --> AST["Read source AST"]
-  AST --> Map["Apply manifest symbol mappings"]
+  Dependencies --> Validate["Validate extension set and manifests"]
+  Source --> Symbols["Language-native source and symbol analysis"]
+  Symbols --> Map["Apply manifest mappings"]
   Validate --> Map
   Map --> Profile["Emit Runtime Conditions Profile"]
   Profile --> ProfileValidate["Validate generated profile"]
@@ -40,38 +42,45 @@ This keeps the language package manager as the source of truth for package versi
 
 ---
 
-# 2. Current Generator Workflow
+# 2. Common Workflow
 
-The current generator flow is language-neutral at the package artifact level. The implemented Go path uses `go.mod`; additional language paths should use their native dependency lists, such as `package.json`, `pyproject.toml`, or comparable package manager metadata.
+The workflow is language-neutral at the package artifact level. Each language implementation should map these steps onto its own resolver and parser:
 
-1. Parse workload source files.
-2. Collect import paths that may contribute declaration, SDK, or production library mappings.
-3. Resolve the workload's code dependency list.
-4. Resolve imports using the language-native package manager and local override rules.
-5. Check each resolved import package for `runtimeconditions.bindings.yaml` or `runtimeconditions.package.yaml`.
-6. Load each discovered manifest.
-7. Load `runtimeconditions.extension.yaml` from the resolved package artifact, or a manifest-referenced vendored/development override.
-8. Resolve the direct extension's declared dependency extension identifiers.
-9. Validate the cumulative extension definition set and discovered manifests.
-10. Parse the workload AST.
-11. Match constructor calls, receiver method calls, and explicit Runtime Conditions declarations.
-12. Emit and validate a Runtime Conditions Profile.
+1. Load the workload project using language-native metadata.
+2. Identify imports, packages, modules, or artifacts that may contribute declaration, SDK, or production library mappings.
+3. Resolve those packages through the language-native package manager or build tool, including local override rules.
+4. Check each resolved package or artifact for `runtimeconditions.bindings.yaml` or `runtimeconditions.package.yaml`.
+5. Load each discovered manifest.
+6. Load `runtimeconditions.extension.yaml` from the resolved package artifact, or a manifest-referenced vendored/development override.
+7. Resolve the direct extension's declared dependency extension identifiers.
+8. Validate the cumulative extension definition set and discovered manifests.
+9. Analyze workload source using the language's native AST, type, or symbol facilities.
+10. Match source usage to manifest mappings.
+11. Emit and validate a Runtime Conditions Profile.
 
-The generator does not need `-extensions-root` for manifests shipped by imported packages.
-
-The `-extensions-root` flag is a development override for local extension definitions. Binding and package manifests are discovered from resolved imports.
+Generators do not need a separate extension root for manifests shipped by resolved packages. A development override root is useful only for local extension definitions, fixtures, or repository-local authoring workflows.
 
 ---
 
-# 3. Java Build-Tool Workflow
+# 3. Language Resolution
+
+## 3.1 Go
+
+The implemented Go path uses `go.mod`, `go/packages`, and Go import resolution. It resolves imported packages to package directories and checks those directories for Runtime Conditions manifests.
+
+The Go CLI's `-extensions-root` flag is a development override for local extension definitions. Binding and package manifests are still discovered from resolved imports.
+
+The Go profiler currently implements source extraction and profile generation.
+
+## 3.2 Java
 
 The Java profiler should treat Maven and Gradle as first-class package resolution sources.
 
-For Maven, the profiler starts from `pom.xml`, reads reactor modules, resolves the selected classpath through Maven, and inspects the resulting module output directories and dependency JARs.
+For Maven, the profiler starts from `pom.xml`, reads reactor modules, resolves the selected classpath through `./mvnw` or `mvn`, and inspects the resulting module output directories and dependency JARs.
 
-For Gradle, the profiler starts from `settings.gradle`, `settings.gradle.kts`, `build.gradle`, or `build.gradle.kts`, reads included projects, resolves the selected source set or configuration through Gradle, and inspects the resulting project outputs and dependency JARs.
+For Gradle, the profiler starts from `settings.gradle`, `settings.gradle.kts`, `build.gradle`, or `build.gradle.kts`, reads included projects, resolves the selected source set or configuration through `./gradlew` or `gradle`, and inspects the resulting project outputs and dependency JARs.
 
-Java packages should expose Runtime Conditions metadata as classpath resources:
+Published Java packages should expose Runtime Conditions metadata as classpath resources:
 
 ```text
 META-INF/runtimeconditions/runtimeconditions.bindings.yaml
@@ -79,13 +88,29 @@ META-INF/runtimeconditions/runtimeconditions.package.yaml
 META-INF/runtimeconditions/runtimeconditions.extension.yaml
 ```
 
-The initial Java profiler implementation discovers those resources from Maven and Gradle source/resource layouts, build output directories, explicit classpath entries, and JAR files. Java AST extraction and full Maven Resolver or Gradle Tooling API integration are later layers on top of this discovery foundation.
+At source time, those files usually live under:
 
-See [Java Profiler Workflow](java-profiler-workflow.md) for the detailed Java design.
+```text
+src/main/resources/META-INF/runtimeconditions/
+```
+
+During repository-local development, the Java profiler may also accept package-root manifests as a convenience:
+
+```text
+runtimeconditions.bindings.yaml
+runtimeconditions.package.yaml
+runtimeconditions.extension.yaml
+```
+
+The current Java profiler slice implements Maven, Gradle, and source-only project detection; Maven reactor module discovery; Gradle included-project discovery; build-tool classpath resolution when requested; and Runtime Conditions artifact discovery from source resources, build output, resolved classpath entries, explicit classpath entries, JAR files, and repository-local package roots.
+
+Java profile extraction should use Java-native parsing and symbol resolution. The source extraction layer should account for static imports, overloaded methods, enum constants, class literals such as `Todo.class`, generics, nested option calls, Maven and Gradle source sets, and multi-module builds.
+
+The Java profiler does not generate Runtime Conditions Profiles yet.
 
 ---
 
-# 4. Demo Walkthrough
+# 4. Go Demo Walkthrough
 
 The current request logger demo imports explicit first-party declaration packages:
 
@@ -115,7 +140,7 @@ common.Cache("request-cache",
 )
 ```
 
-Running the generator:
+Running the Go generator:
 
 ```sh
 cd go/profiler
