@@ -20,15 +20,21 @@ type authoringFixture struct {
 func TestValidateFirstPartyExtensions(t *testing.T) {
 	extensionsRoot := repoPath(t, "extensions")
 
-	tests := []string{
-		filepath.Join(extensionsRoot, "common-integrations"),
-		filepath.Join(extensionsRoot, "env-configuration"),
+	tests := []struct {
+		root     string
+		language string
+		require  bool
+	}{
+		{root: filepath.Join(extensionsRoot, "common-integrations"), language: "go", require: true},
+		{root: filepath.Join(extensionsRoot, "env-configuration"), language: "go", require: true},
+		{root: filepath.Join(extensionsRoot, "common-integrations"), language: "java", require: true},
+		{root: filepath.Join(extensionsRoot, "env-configuration"), language: "java", require: true},
 	}
-	for _, root := range tests {
-		t.Run(filepath.Base(root), func(t *testing.T) {
-			err := ValidateExtension(root, Options{
-				Language:               "go",
-				RequireLanguagePackage: true,
+	for _, test := range tests {
+		t.Run(filepath.Base(test.root)+"/"+test.language, func(t *testing.T) {
+			err := ValidateExtension(test.root, Options{
+				Language:               test.language,
+				RequireLanguagePackage: test.require,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -372,6 +378,200 @@ spec:
 		t.Fatal("expected validation error")
 	}
 	if !strings.Contains(err.Error(), "conditionField:configuration") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateExtensionRejectsJavaBindingWithoutEntryClass(t *testing.T) {
+	root := t.TempDir()
+	extension := filepath.Join(root, "broken")
+	writeFiles(t, map[string]string{
+		filepath.Join(extension, "broken-v1alpha1.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsExtensionDefinition
+
+metadata:
+  id: https://example.com/runtimeconditions/java-missing-class/v1alpha1/runtimeconditions.extension.yaml
+
+spec:
+  kinds:
+    - name: java.broken
+`,
+		filepath.Join(extension, "java", goBindingsManifest): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsBinding
+
+metadata:
+  extension: https://example.com/runtimeconditions/java-missing-class/v1alpha1/runtimeconditions.extension.yaml
+  extensionDefinition: ../broken-v1alpha1.yaml
+  language: java
+
+java:
+  package: io.example.broken
+
+  declarations:
+    - function: declare
+      nameArg: 0
+      kind: java.broken
+`,
+		filepath.Join(extension, "java", "src", "main", "java", "io", "example", "broken", "Broken.java"): `package io.example.broken;
+
+public final class Broken {
+    public static final class Declaration {
+    }
+
+    public static Declaration declare(String name) {
+        return new Declaration();
+    }
+}
+`,
+	})
+
+	err := ValidateExtension(extension, Options{
+		Language:               "java",
+		RequireLanguagePackage: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "Java declaration function declare is missing class") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateExtensionRejectsJavaBindingWithoutStaticMethod(t *testing.T) {
+	root := t.TempDir()
+	extension := filepath.Join(root, "broken")
+	writeFiles(t, map[string]string{
+		filepath.Join(extension, "broken-v1alpha1.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsExtensionDefinition
+
+metadata:
+  id: https://example.com/runtimeconditions/java-missing-method/v1alpha1/runtimeconditions.extension.yaml
+
+spec:
+  kinds:
+    - name: java.broken
+`,
+		filepath.Join(extension, "java", goBindingsManifest): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsBinding
+
+metadata:
+  extension: https://example.com/runtimeconditions/java-missing-method/v1alpha1/runtimeconditions.extension.yaml
+  extensionDefinition: ../broken-v1alpha1.yaml
+  language: java
+
+java:
+  package: io.example.broken
+
+  declarations:
+    - class: Broken
+      function: missing
+      nameArg: 0
+      kind: java.broken
+`,
+		filepath.Join(extension, "java", "src", "main", "java", "io", "example", "broken", "Broken.java"): `package io.example.broken;
+
+public final class Broken {
+    public static final class Declaration {
+    }
+
+    public static Declaration present(String name) {
+        return new Declaration();
+    }
+}
+`,
+	})
+
+	err := ValidateExtension(extension, Options{
+		Language:               "java",
+		RequireLanguagePackage: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "binding declaration function Broken.missing is not declared in Java package") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateExtensionRejectsJavaBindingConstantMismatch(t *testing.T) {
+	root := t.TempDir()
+	extension := filepath.Join(root, "broken")
+	writeFiles(t, map[string]string{
+		filepath.Join(extension, "broken-v1alpha1.yaml"): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsExtensionDefinition
+
+metadata:
+  id: https://example.com/runtimeconditions/java-constant-mismatch/v1alpha1/runtimeconditions.extension.yaml
+
+spec:
+  kinds:
+    - name: java.cache
+  interfaceTypes:
+    - name: key_value
+      targetKind: java.cache
+  interfaceFields:
+    - name: engine
+      targetKind: java.cache
+      targetType: key_value
+  fieldValues:
+    - field: interface.engine
+      targetKind: java.cache
+      targetType: key_value
+      values:
+        - redis
+`,
+		filepath.Join(extension, "java", goBindingsManifest): `apiVersion: runtimeconditions.io/v1alpha1
+kind: RuntimeConditionsBinding
+
+metadata:
+  extension: https://example.com/runtimeconditions/java-constant-mismatch/v1alpha1/runtimeconditions.extension.yaml
+  extensionDefinition: ../broken-v1alpha1.yaml
+  language: java
+
+java:
+  package: io.example.broken
+
+  constants:
+    Broken.Engine.REDIS: redis
+
+  declarations:
+    - class: Broken
+      function: declare
+      nameArg: 0
+      kind: java.cache
+      interfaceType: key_value
+`,
+		filepath.Join(extension, "java", "src", "main", "java", "io", "example", "broken", "Broken.java"): `package io.example.broken;
+
+public final class Broken {
+    public enum Engine {
+        REDIS("valkey");
+
+        private final String value;
+
+        Engine(String value) {
+            this.value = value;
+        }
+    }
+
+    public static final class Declaration {
+    }
+
+    public static Declaration declare(String name) {
+        return new Declaration();
+    }
+}
+`,
+	})
+
+	err := ValidateExtension(extension, Options{
+		Language:               "java",
+		RequireLanguagePackage: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), `binding constant Broken.Engine.REDIS value "redis" does not match Java value "valkey"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

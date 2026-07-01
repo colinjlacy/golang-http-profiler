@@ -215,6 +215,31 @@ conditions:
           </div>
         </section>
 
+        <section class="section">
+          <h2>7. Java starts from Maven and Gradle artifacts</h2>
+          <p class="short">
+            The Java profiler discovers Runtime Conditions metadata from Maven and Gradle project layouts, resolved classpath directories, and JAR resources. It currently generates profiles from declarative Java binding packages; SDK/runtime package extraction is intentionally deferred.
+          </p>
+          <div class="example">
+            <div class="example-title">Java artifact resource layout</div>
+            <pre><code>META-INF/runtimeconditions/runtimeconditions.bindings.yaml
+META-INF/runtimeconditions/runtimeconditions.package.yaml
+META-INF/runtimeconditions/runtimeconditions.extension.yaml</code></pre>
+          </div>
+          <div class="example">
+            <div class="example-title">Profile generation command</div>
+            <pre><code>cd java/profiler
+mvn -q package
+
+java -jar target/runtimeconditions-java-profiler-0.1.0-SNAPSHOT.jar generate \
+  --project src/testdata/declarative-app \
+  --classpath ../../extensions/common-integrations/java:../../extensions/env-configuration/java \
+  --name java-declarative-app \
+  --workload-uri example/java-declarative-app \
+  --workload-version test</code></pre>
+          </div>
+        </section>
+
         <nav class="page-nav" aria-label="Page navigation">
           <a href="spec.html">Previous: Profile shape</a>
           <a href="extensions.html">Next: Extensions</a>

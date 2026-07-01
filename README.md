@@ -41,8 +41,9 @@ This repository contains:
 
 - `ebpf-profiler/` - the original Linux eBPF runtime observation profiler.
 - `docs/` - the Runtime Conditions Profile specification draft and authoring guides.
-- `extensions/` - first-party extension definitions and their Go declaration packages.
+- `extensions/` - first-party extension definitions and declaration packages.
 - `go/profiler/` - the maintained Go AST profile generator.
+- `java/profiler/` - Java-native profiler work, currently focused on Maven/Gradle-aware Runtime Conditions artifact discovery.
 - `demos/apps/` - demo workloads used to exercise declaration packages and downstream adapters.
 - `demos/kratix/` - Kratix adapter and Promise demo assets.
 - `examples/sdks/` - SDK packaging examples for package-owned manifests.
@@ -75,6 +76,26 @@ go run . \
   -name request-logger-http \
   -workload-version dev
 ```
+
+## Java Profiler
+
+```sh
+cd java/profiler
+mvn -q package dependency:build-classpath \
+  -Dmdep.outputFile=/tmp/runtimeconditions-java-profiler.classpath
+
+CP="target/classes:$(cat /tmp/runtimeconditions-java-profiler.classpath)"
+
+java -cp "$CP" \
+  io.runtimeconditions.profiler.ProfilerCli generate \
+  --project src/testdata/declarative-app \
+  --classpath ../../extensions/common-integrations/java:../../extensions/env-configuration/java \
+  --name java-declarative-app \
+  --workload-uri example/java-declarative-app \
+  --workload-version test
+```
+
+The Java profiler currently generates profiles from declarative Java binding packages. SDK/runtime package extraction is intentionally not implemented yet.
 
 ## Try It Out
 

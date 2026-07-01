@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -49,9 +50,6 @@ func ValidateExtensions(root string, opts Options) error {
 // ValidateBindingManifest validates a Go binding or package manifest against
 // its referenced extension definition and resolved dependency graph.
 func ValidateBindingManifest(path string, opts Options) error {
-	if opts.Language == "" {
-		opts.Language = "go"
-	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -59,6 +57,12 @@ func ValidateBindingManifest(path string, opts Options) error {
 	binding, err := readBindingDocument(absPath)
 	if err != nil {
 		return err
+	}
+	if opts.Language == "" {
+		opts.Language = binding.Metadata.Language
+		if opts.Language == "" {
+			opts.Language = "go"
+		}
 	}
 	extensionDefinition := binding.extensionDefinitionPath()
 	if extensionDefinition == "" {
@@ -91,7 +95,10 @@ func ValidateBindingManifest(path string, opts Options) error {
 	}
 	node.BindingPath = absPath
 	node.Binding = binding
-	node.GoDir = filepath.Dir(absPath)
+	node.BindingDir = filepath.Dir(absPath)
+	if opts.Language == "go" {
+		node.GoDir = node.BindingDir
+	}
 	validator.validateNode(id)
 	return validator.err()
 }
@@ -272,6 +279,7 @@ type extensionNode struct {
 	Definition     extensionDefinition
 	BindingPath    string
 	Binding        *bindingDocument
+	BindingDir     string
 	GoDir          string
 }
 
@@ -343,7 +351,8 @@ type bindingDocument struct {
 		ID         string `yaml:"id"`
 		Definition string `yaml:"definition"`
 	} `yaml:"extension"`
-	Go bindingGo `yaml:"go"`
+	Go   bindingGo   `yaml:"go"`
+	Java bindingJava `yaml:"java"`
 }
 
 type profileDocument struct {
@@ -412,12 +421,21 @@ type bindingGo struct {
 	Options      []bindingOption      `yaml:"options"`
 }
 
+type bindingJava struct {
+	Package      string               `yaml:"package"`
+	Class        string               `yaml:"class"`
+	Constants    map[string]string    `yaml:"constants"`
+	Declarations []bindingDeclaration `yaml:"declarations"`
+	Options      []bindingOption      `yaml:"options"`
+}
+
 type bindingConstructor struct {
 	Function string `yaml:"function"`
 	Receiver string `yaml:"receiver"`
 }
 
 type bindingDeclaration struct {
+	Class         string         `yaml:"class"`
 	Function      string         `yaml:"function"`
 	Receiver      string         `yaml:"receiver"`
 	Method        string         `yaml:"method"`
@@ -435,12 +453,15 @@ type bindingValue struct {
 }
 
 type bindingOption struct {
+	Class                   string            `yaml:"class"`
 	Function                string            `yaml:"function"`
 	Target                  string            `yaml:"target"`
 	Value                   string            `yaml:"value"`
 	ValueArg                *int              `yaml:"valueArg"`
 	TypeArg                 *int              `yaml:"typeArg"`
 	EngineArg               *int              `yaml:"engineArg"`
+	EnumArg                 *int              `yaml:"enumArg"`
+	ClassArg                *int              `yaml:"classArg"`
 	Method                  string            `yaml:"method"`
 	AppliesToKinds          []string          `yaml:"appliesToKinds"`
 	AppliesToInterfaceTypes []string          `yaml:"appliesToInterfaceTypes"`
@@ -462,6 +483,24 @@ type goFunc struct {
 	name           string
 	params         []goParam
 	typeParamCount int
+}
+
+type javaFunc struct {
+	name   string
+	params []javaParam
+}
+
+type javaParam struct {
+	name     string
+	typ      string
+	variadic bool
+}
+
+type javaClass struct {
+	name      string
+	packageID string
+	methods   map[string][]javaFunc
+	constants map[string]string
 }
 
 type goParam struct {
@@ -527,7 +566,7 @@ func (v *validator) loadCatalog(roots []string) error {
 				DefinitionPath: path,
 				Definition:     definition,
 			}
-			v.discoverGoBinding(node)
+			v.discoverLanguageBinding(node)
 			v.nodes[id] = node
 			return nil
 		})
@@ -538,30 +577,43 @@ func (v *validator) loadCatalog(roots []string) error {
 	return nil
 }
 
-func (v *validator) discoverGoBinding(node *extensionNode) {
-	if v.opts.Language != "go" {
-		return
+func (v *validator) discoverLanguageBinding(node *extensionNode) {
+	switch v.opts.Language {
+	case "go":
+		v.discoverBinding(node, "go")
+	case "java":
+		v.discoverBinding(node, "java")
 	}
-	goDir := filepath.Join(node.Dir, "go")
-	info, err := os.Stat(goDir)
+}
+
+func (v *validator) discoverGoBinding(node *extensionNode) {
+	v.discoverBinding(node, "go")
+}
+
+func (v *validator) discoverBinding(node *extensionNode, language string) {
+	dir := filepath.Join(node.Dir, language)
+	info, err := os.Stat(dir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			v.addf(goDir, "%v", err)
+			v.addf(dir, "%v", err)
 		}
 		return
 	}
 	if !info.IsDir() {
-		v.addf(goDir, "expected language package path to be a directory")
+		v.addf(dir, "expected language package path to be a directory")
 		return
 	}
-	node.GoDir = goDir
-	manifest, ok, err := findBindingManifest(goDir)
+	node.BindingDir = dir
+	if language == "go" {
+		node.GoDir = dir
+	}
+	manifest, ok, err := findBindingManifest(dir)
 	if err != nil {
-		v.addf(goDir, "%v", err)
+		v.addf(dir, "%v", err)
 		return
 	}
 	if !ok {
-		v.addf(goDir, "missing %s", goBindingsManifest)
+		v.addf(dir, "missing %s", goBindingsManifest)
 		return
 	}
 	binding, err := readBindingDocument(manifest)
@@ -606,6 +658,7 @@ func (v *validator) validateNode(id string) {
 	v.validateVocabulary(node, resolved)
 	v.validateBinding(node, resolved)
 	v.validateGoDeclarations(node)
+	v.validateJavaDeclarations(node)
 	v.states[id] = 2
 }
 
@@ -773,12 +826,9 @@ func (v *validator) checkResolvedConflicts(path string, resolved vocabulary) {
 }
 
 func (v *validator) validateBinding(node *extensionNode, resolved vocabulary) {
-	if v.opts.Language != "go" {
-		return
-	}
 	if node.Binding == nil {
-		if node.GoDir != "" || v.opts.RequireLanguagePackage {
-			v.addf(node.Dir, "missing Go binding manifest")
+		if node.BindingDir != "" || v.opts.RequireLanguagePackage {
+			v.addf(node.Dir, "missing %s binding manifest", languageDisplayName(v.opts.Language))
 		}
 		return
 	}
@@ -797,8 +847,8 @@ func (v *validator) validateBinding(node *extensionNode, resolved vocabulary) {
 	}
 	if binding.Metadata.Language == "" {
 		v.addf(node.BindingPath, "metadata.language is required")
-	} else if binding.Metadata.Language != "go" {
-		v.addf(node.BindingPath, "metadata.language must be go")
+	} else if binding.Metadata.Language != v.opts.Language {
+		v.addf(node.BindingPath, "metadata.language must be %s", v.opts.Language)
 	}
 	bindingID := binding.extensionID()
 	if bindingID == "" {
@@ -819,6 +869,19 @@ func (v *validator) validateBinding(node *extensionNode, resolved vocabulary) {
 			v.addf(node.BindingPath, "binding extension definition %s does not match %s", absDefinition, absNodeDefinition)
 		}
 	}
+
+	switch v.opts.Language {
+	case "go":
+		v.validateGoBinding(node, resolved)
+	case "java":
+		v.validateJavaBinding(node, resolved)
+	default:
+		v.addf(node.BindingPath, "unsupported binding language %s", v.opts.Language)
+	}
+}
+
+func (v *validator) validateGoBinding(node *extensionNode, resolved vocabulary) {
+	binding := node.Binding
 	if binding.Go.ImportPath == "" {
 		v.addf(node.BindingPath, "go.importPath is required")
 	}
@@ -838,6 +901,32 @@ func (v *validator) validateBinding(node *extensionNode, resolved vocabulary) {
 	}
 	for _, option := range binding.Go.Options {
 		v.validateBindingOption(node.BindingPath, resolved, option, scopesFromOption(option, resolved))
+	}
+}
+
+func (v *validator) validateJavaBinding(node *extensionNode, resolved vocabulary) {
+	binding := node.Binding
+	if binding.Java.Package == "" {
+		v.addf(node.BindingPath, "java.package is required")
+	}
+	if binding.Java.Class != "" {
+		v.addf(node.BindingPath, "top-level java.class must not be used; Java bindings use per-entry class")
+	}
+	if len(binding.Java.Declarations) == 0 && len(binding.Java.Options) == 0 {
+		v.addf(node.BindingPath, "java.declarations or java.options must not be empty")
+	}
+	for name, value := range binding.Java.Constants {
+		if resolved.fieldValueValueCount(value) == 0 {
+			v.addf(node.BindingPath, "constant %s value %q is not defined by resolved field values", name, value)
+		}
+	}
+	for _, declaration := range binding.Java.Declarations {
+		v.validateBindingDeclaration(node.BindingPath, resolved, declaration)
+		v.validateJavaDeclarationShape(node.BindingPath, declaration)
+	}
+	for _, option := range binding.Java.Options {
+		v.validateBindingOption(node.BindingPath, resolved, option, scopesFromOption(option, resolved))
+		v.validateJavaOptionShape(node.BindingPath, option)
 	}
 }
 
@@ -898,6 +987,33 @@ func (v *validator) validateBindingOption(path string, resolved vocabulary, opti
 	}
 	for _, nested := range option.Options {
 		v.validateBindingOption(path, resolved, nested, optionScopes)
+	}
+}
+
+func (v *validator) validateJavaDeclarationShape(path string, declaration bindingDeclaration) {
+	if declaration.Class == "" {
+		v.addf(path, "Java declaration function %s is missing class", declaration.Function)
+	}
+	if declaration.Function == "" {
+		v.addf(path, "Java declaration for class %s is missing function", declaration.Class)
+	}
+	if declaration.Method != "" {
+		v.addf(path, "Java declaration %s.%s must use function, not method", declaration.Class, declaration.Method)
+	}
+	for _, option := range declaration.Options {
+		v.validateJavaOptionShape(path, option)
+	}
+}
+
+func (v *validator) validateJavaOptionShape(path string, option bindingOption) {
+	if option.Class == "" {
+		v.addf(path, "Java option function %s is missing class", option.Function)
+	}
+	if option.Function == "" {
+		v.addf(path, "Java option for class %s is missing function", option.Class)
+	}
+	for _, nested := range option.Options {
+		v.validateJavaOptionShape(path, nested)
 	}
 }
 
@@ -1008,6 +1124,124 @@ func (v *validator) validateParamIndex(path string, fn goFunc, index int, field 
 	}
 }
 
+func (v *validator) validateJavaDeclarations(node *extensionNode) {
+	if v.opts.Language != "java" || node.Binding == nil {
+		return
+	}
+	binding := node.Binding
+	if node.BindingDir == "" {
+		return
+	}
+	for name, value := range binding.Java.Constants {
+		className, constantName, ok := javaConstantParts(name)
+		if !ok {
+			v.addf(node.BindingDir, "Java constant %s must include class and constant name", name)
+			continue
+		}
+		class, ok := v.readJavaBindingClass(node, className)
+		if !ok {
+			continue
+		}
+		actual, ok := class.constants[constantName]
+		if !ok {
+			v.addf(node.BindingDir, "binding constant %s is not declared in Java class %s", name, className)
+			continue
+		}
+		if actual != value {
+			v.addf(node.BindingDir, "binding constant %s value %q does not match Java value %q", name, value, actual)
+		}
+	}
+	for _, declaration := range binding.Java.Declarations {
+		v.validateJavaDeclarationSource(node, declaration)
+	}
+	for _, option := range binding.Java.Options {
+		v.validateJavaOptionSource(node, option)
+	}
+}
+
+func (v *validator) validateJavaDeclarationSource(node *extensionNode, declaration bindingDeclaration) {
+	if declaration.Class == "" || declaration.Function == "" {
+		return
+	}
+	class, ok := v.readJavaBindingClass(node, declaration.Class)
+	if !ok {
+		return
+	}
+	methods := class.methods[declaration.Function]
+	if len(methods) == 0 {
+		v.addf(node.BindingDir, "binding declaration function %s.%s is not declared in Java package", declaration.Class, declaration.Function)
+		return
+	}
+	v.validateJavaFunctionIndexes(node.BindingDir, methods[0], declaration.NameArg, nil, nil, nil, nil)
+	for _, option := range declaration.Options {
+		v.validateJavaOptionSource(node, option)
+	}
+}
+
+func (v *validator) validateJavaOptionSource(node *extensionNode, option bindingOption) {
+	if option.Class == "" || option.Function == "" {
+		return
+	}
+	class, ok := v.readJavaBindingClass(node, option.Class)
+	if !ok {
+		return
+	}
+	methods := class.methods[option.Function]
+	if len(methods) == 0 {
+		v.addf(node.BindingDir, "binding option function %s.%s is not declared in Java package", option.Class, option.Function)
+		return
+	}
+	v.validateJavaFunctionIndexes(node.BindingDir, methods[0], nil, option.StringArgs, option.ValueArg, option.EnumArg, option.ClassArg)
+	for _, nested := range option.Options {
+		v.validateJavaOptionSource(node, nested)
+	}
+}
+
+func (v *validator) readJavaBindingClass(node *extensionNode, className string) (javaClass, bool) {
+	class, err := readJavaClass(node.BindingDir, node.Binding.Java.Package, className)
+	if err != nil {
+		v.addf(node.BindingDir, "%v", err)
+		return javaClass{}, false
+	}
+	if class.packageID != node.Binding.Java.Package {
+		v.addf(node.BindingDir, "Java package %s does not match binding package %s", class.packageID, node.Binding.Java.Package)
+		return javaClass{}, false
+	}
+	return class, true
+}
+
+func (v *validator) validateJavaFunctionIndexes(path string, fn javaFunc, nameArg *int, stringArgs map[string]int, valueArg *int, enumArg *int, classArg *int) {
+	if nameArg != nil {
+		v.validateJavaParamIndex(path, fn, *nameArg, "nameArg", "String")
+	}
+	for name, index := range stringArgs {
+		v.validateJavaParamIndex(path, fn, index, "stringArgs."+name, "String")
+	}
+	if valueArg != nil {
+		v.validateJavaParamIndex(path, fn, *valueArg, "valueArg", "")
+	}
+	if enumArg != nil {
+		v.validateJavaParamIndex(path, fn, *enumArg, "enumArg", "")
+	}
+	if classArg != nil {
+		v.validateJavaParamIndex(path, fn, *classArg, "classArg", "Class")
+	}
+}
+
+func (v *validator) validateJavaParamIndex(path string, fn javaFunc, index int, field string, expectedType string) {
+	if index < 0 || index >= len(fn.params) {
+		v.addf(path, "binding %s for Java function %s index %d is out of range", field, fn.name, index)
+		return
+	}
+	if expectedType == "" {
+		return
+	}
+	param := fn.params[index]
+	if !javaTypeMatches(param.typ, expectedType) {
+		v.addf(path, "binding %s for Java function %s points at non-%s parameter %s %s", field, fn.name, expectedType, param.name, param.typ)
+	}
+}
+
 func readExtensionDefinition(path string) (extensionDefinition, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1039,6 +1273,109 @@ func readBindingDocument(path string) (*bindingDocument, error) {
 		return nil, err
 	}
 	return &document, nil
+}
+
+func readJavaClass(dir string, packageID string, className string) (javaClass, error) {
+	if className == "" {
+		return javaClass{}, fmt.Errorf("Java class name is required")
+	}
+	if strings.ContainsAny(className, ".$/") {
+		return javaClass{}, fmt.Errorf("Java binding class %s must be a top-level class name", className)
+	}
+	sourceRoot := filepath.Join(dir, "src", "main", "java")
+	if packageID != "" {
+		sourceRoot = filepath.Join(sourceRoot, filepath.Join(strings.Split(packageID, ".")...))
+	}
+	path := filepath.Join(sourceRoot, className+".java")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return javaClass{}, err
+	}
+	return parseJavaClassSource(className, string(data)), nil
+}
+
+func parseJavaClassSource(className string, source string) javaClass {
+	class := javaClass{
+		name:      className,
+		methods:   make(map[string][]javaFunc),
+		constants: make(map[string]string),
+	}
+	if match := regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;`).FindStringSubmatch(source); len(match) == 2 {
+		class.packageID = match[1]
+	}
+	methodPattern := regexp.MustCompile(`(?m)\bpublic\s+static\s+(?:<[^>]+>\s+)?[A-Za-z0-9_.$<>\[\]?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)`)
+	for _, match := range methodPattern.FindAllStringSubmatch(source, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		fn := javaFunc{
+			name:   match[1],
+			params: parseJavaParams(match[2]),
+		}
+		class.methods[fn.name] = append(class.methods[fn.name], fn)
+	}
+	enumPattern := regexp.MustCompile(`(?m)\b([A-Z][A-Z0-9_]*)\s*\(\s*"([^"]*)"\s*\)`)
+	for _, match := range enumPattern.FindAllStringSubmatch(source, -1) {
+		if len(match) == 3 {
+			class.constants[match[1]] = match[2]
+		}
+	}
+	stringConstantPattern := regexp.MustCompile(`(?m)\b([A-Z][A-Z0-9_]*)\s*=\s*"([^"]*)"`)
+	for _, match := range stringConstantPattern.FindAllStringSubmatch(source, -1) {
+		if len(match) == 3 {
+			class.constants[match[1]] = match[2]
+		}
+	}
+	return class
+}
+
+func parseJavaParams(params string) []javaParam {
+	params = strings.TrimSpace(params)
+	if params == "" {
+		return nil
+	}
+	parts := splitJavaParams(params)
+	result := make([]javaParam, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		part = strings.TrimPrefix(part, "final ")
+		if part == "" {
+			continue
+		}
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[len(fields)-1]
+		typ := strings.TrimSpace(strings.TrimSuffix(part[:len(part)-len(name)], " "))
+		variadic := strings.Contains(typ, "...")
+		typ = strings.ReplaceAll(typ, "...", "")
+		result = append(result, javaParam{name: name, typ: strings.TrimSpace(typ), variadic: variadic})
+	}
+	return result
+}
+
+func splitJavaParams(params string) []string {
+	var parts []string
+	start := 0
+	depth := 0
+	for index, r := range params {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, params[start:index])
+				start = index + len(string(r))
+			}
+		}
+	}
+	parts = append(parts, params[start:])
+	return parts
 }
 
 func readGoPackage(dir string) (goPackage, error) {
@@ -1551,6 +1888,37 @@ func findBindingManifest(dir string) (string, bool, error) {
 		return path, true, nil
 	}
 	return "", false, nil
+}
+
+func languageDisplayName(language string) string {
+	switch language {
+	case "go":
+		return "Go"
+	case "java":
+		return "Java"
+	default:
+		return language
+	}
+}
+
+func javaConstantParts(name string) (string, string, bool) {
+	parts := strings.Split(name, ".")
+	if len(parts) < 2 || parts[0] == "" || parts[len(parts)-1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[len(parts)-1], true
+}
+
+func javaTypeMatches(actual string, expected string) bool {
+	actual = strings.TrimSpace(actual)
+	switch expected {
+	case "String":
+		return actual == "String" || actual == "java.lang.String"
+	case "Class":
+		return actual == "Class" || strings.HasPrefix(actual, "Class<") || actual == "java.lang.Class" || strings.HasPrefix(actual, "java.lang.Class<")
+	default:
+		return actual == expected
+	}
 }
 
 func definitionID(def extensionDefinition) string {
